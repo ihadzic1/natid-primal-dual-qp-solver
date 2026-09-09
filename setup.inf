@@ -1,6 +1,6 @@
 ;*** BEGIN **********************************************************
 ;**                                                                **
-;** Automatically generated on: Wed Sep 09 14:02:49 2026           **
+;** Automatically generated on: Thu Sep 10 01:39:17 2026           **
 ;**                                                                **
 ;** MakeCAB Version: 5.00                                 **
 ;**                                                                **
@@ -43,7 +43,7 @@
 1,1,libpng16.dll,260608
 1,1,mainUtils.dll,470016
 1,1,Matrix.dll,12925440
-1,1,natGUI.dll,1829376
+1,1,natGUI.dll,1844224
 1,1,natid_qp_gui.exe,171520
 1,1,pango_1.0_0.dll,429056
 1,1,pangocairo_1.0_0.dll,73216
@@ -77,13 +77,13 @@
 1,1,res_tr_EN.xml,1894
 1,1,rsvg_2_2.dll,31919616
 1,1,sass.dll,2725376
-1,1,symbSolvers.dll,881152
+1,1,symbSolvers.dll,876032
 1,1,tiff.dll,584704
 1,1,turbojpeg.dll,2002432
 1,1,xml2_16.dll,1327616
 1,1,zlib1.dll,89600
 ;*** END ************************************************************
 ;**                                                                **
-;** Automatically generated on: Wed Sep 09 14:02:49 2026           **
+;** Automatically generated on: Thu Sep 10 01:39:17 2026           **
 ;**                                                                **
 ;*** END ************************************************************

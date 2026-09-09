@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install natID SDK and utilities
         shell: pwsh
@@ -111,7 +111,7 @@ jobs:
           }
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: NatIDQP-Windows
           path: NatIDQP-Windows.zip
@@ -135,7 +135,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install natID SDK and utilities
         run: |
@@ -195,7 +195,7 @@ jobs:
             "NatIDQP-macOS-${{ matrix.label }}.zip"
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: NatIDQP-macOS-${{ matrix.label }}
           path: installer-output/NatIDQP-macOS-${{ matrix.label }}.zip
@@ -206,7 +206,7 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build prerequisites
         run: |
@@ -264,7 +264,7 @@ jobs:
           zip -j "$GITHUB_WORKSPACE/NatIDQP-Linux.zip" "$output"/*.deb
 
       - name: Upload Linux artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: NatIDQP-Linux
           path: NatIDQP-Linux.zip
@@ -292,7 +292,7 @@ jobs:
           fi
 
       - name: Download all installer artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 

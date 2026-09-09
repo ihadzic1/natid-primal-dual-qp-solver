@@ -41,6 +41,10 @@ add_subdirectory(gui)
 is located at `gui/res/DevRes.xml`. Pointing `dev` at the repository root makes
 SetupCollector fail with `There is no DevRes file`.
 
+The output folder is named `natid_qp_gui` to match `executableName`. Linux
+`dpkg-deb` requires these names to match when it reads
+`natid_qp_gui/DEBIAN/control`.
+
 The GUI's `gui/res/DevRes.xml` must also contain non-empty product metadata,
 especially `displayName`. SetupCollector uses this information for the Windows
 installer and stops with `Product displayName cannot be empty` if it is absent.

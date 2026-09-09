@@ -2,7 +2,7 @@
 <SetupCollector xmlns:win="windows" xmlns:mac="macOS" xmlns:lin="linux" executableName="natid_qp_gui">
     <Folders dev="~Desktop/NatIDQP-Packaging-Source/gui"
              executable="$RAMDisk/Out/NatIDQP/Release"
-             out="$RAMDisk/Setup/NatIDQP"/>
+             out="$RAMDisk/Setup/natid_qp_gui"/>
     <Packages debug="false">
         <Package name="natGUIALL"/>
         <Package name="Matrix"/>
