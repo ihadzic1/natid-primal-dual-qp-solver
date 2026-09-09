@@ -1,2 +1,236 @@
-# natid-primal-dual-qp-solver
-Primal-Dual Interior-Point Solver for Convex Quadratic Programming using natID Sparse and Dense Matrices.
+# NatIDQP
+
+Primal-dual interior-point solver for convex quadratic programs, implemented
+with natID dense and sparse matrix APIs.
+
+**Course:** Numerical Optimization  
+**Author:** Irfan Hadzic (index 20013)
+
+The solver handles
+
+\[
+\min_x \frac{1}{2}x^\mathsf{T}Qx+c^\mathsf{T}x
+\quad\text{subject to}\quad
+Ax=b,\qquad Gx\le h,
+\]
+
+where \(Q\) is symmetric positive semidefinite. Inequalities are converted to
+\(Gx+s=h\), with strictly positive slack \(s\) and inequality dual \(z\).
+
+## Implemented functionality
+
+- Mehrotra predictor-corrector primal-dual IPM.
+- Infeasible-start initialization.
+- Affine predictor and centering-plus-correction direction.
+- Fraction-to-boundary line search that keeps \(s>0\) and \(z>0\).
+- Dense natID problem storage:
+  `dense::DblMatrix` for \(Q,c,A,b,G,h\).
+- `dense::DblDiagMatrix` for the \(S^{-1}Z\) diagonal.
+- Sparse augmented KKT assembly through
+  `sparse::IMatrix::addTriple()`.
+- Symmetric-indefinite solve through `sparse::ISolver`, using:
+  - `sparse::SolverType::LDLT`
+  - `sparse::Symmetry::SymmetricIndef`
+  - `sparse::Pivoting::AlterMatrixIfIndefinite`
+- One KKT factorization and two right-hand-side solves per IPM iteration.
+- Matrix Market input for coordinate and array formats.
+- Per-iteration primal residual, dual residual, duality gap, barrier value,
+  KKT nonzero count, and timing statistics.
+- CSV convergence history, text solution reports, and Matrix Market solution
+  export.
+- Two checked example problems and automated tests.
+
+The implementation does not use Eigen or another production linear algebra
+backend.
+
+## Project layout
+
+```text
+NatIDQP/
+  CMakeLists.txt
+  include/natid_qp/        Public project headers
+  src/                     Solver, Matrix Market I/O, and CLI
+  data/                    Small verified QP examples
+  docs/                    Algorithm and implementation notes
+  scripts/                 Build, benchmark generation, and plotting helpers
+  tests/                   Solver tests
+    portable_natID/        Test-only API compatibility layer
+```
+
+## Building with the supplied natID SDK on Windows
+
+The supplied SDK archive contains Windows `.dll` and `.lib` binaries. Extract
+it so the SDK has this structure:
+
+```text
+C:\Users\<user>\natID.SDK\
+  Common\
+  DevEnv\
+  bin\
+```
+
+Then open PowerShell in the `NatIDQP` directory:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+  -DNATID_SDK_ROOT="$env:USERPROFILE/natID.SDK"
+cmake --build build --config Release
+```
+
+The helper script performs the same steps:
+
+```powershell
+.\scripts\build_windows.ps1
+```
+
+Before running outside Visual Studio, make the natID DLL directory available:
+
+```powershell
+$env:PATH="$env:USERPROFILE\natID.SDK\bin;$env:PATH"
+```
+
+The natID `Common.cmake` file controls the final runtime output directory.
+The build output prints the exact path to `natid_qp.exe`.
+
+For Linux or macOS, install the matching natID `.so` or `.dylib` package and
+point `NATID_SDK_ROOT` to that SDK. The Windows binaries from the supplied
+archive cannot be linked on Linux.
+
+## Running
+
+Run the built executable from this project directory.
+
+Built-in problem with an active inequality:
+
+```powershell
+natid_qp.exe --demo inequality --csv convergence.csv `
+  --output solution.txt --solution-dir solution
+```
+
+Built-in problem with one equality and nonnegativity constraints:
+
+```powershell
+natid_qp.exe --demo equality
+```
+
+Load one of the Matrix Market examples:
+
+```powershell
+natid_qp.exe --problem data/inequality_qp --csv convergence.csv
+natid_qp.exe --problem data/equality_qp --no-print-kkt
+```
+
+Load explicit files:
+
+```powershell
+natid_qp.exe --Q Q.mtx --c c.mtx --A A.mtx --b b.mtx `
+  --G G.mtx --h h.mtx
+```
+
+`A.mtx` and `b.mtx` are optional, but they must either both be present or both
+be omitted. `Q.mtx`, `c.mtx`, `G.mtx`, and `h.mtx` are required for an
+inequality-constrained problem.
+
+Use `natid_qp.exe --help` for all solver and output options.
+
+## Matrix Market convention
+
+- Matrices may use `coordinate` or `array` storage.
+- `real`, `integer`, and coordinate `pattern` fields are supported.
+- `general`, `symmetric`, `hermitian` (real-valued), and `skew-symmetric`
+  declarations are recognized.
+- Matrix Market indices are one-based, as required by the format.
+- Vectors can be stored as \(n\times1\) or \(1\times n\); row vectors are
+  converted to columns.
+- Duplicate coordinate entries are accumulated.
+
+A directory-based problem uses these names:
+
+```text
+Q.mtx
+c.mtx
+A.mtx   optional
+b.mtx   optional
+G.mtx
+h.mtx
+```
+
+## Verified examples
+
+### Inequality example
+
+\[
+Q=I,\quad c=(-1.5,-1),\quad
+x_1+x_2\le1,\quad x_1\ge0,\quad x_2\ge0.
+\]
+
+Expected solution:
+
+\[
+x^\star=(0.75,0.25),\qquad f(x^\star)=-1.0625.
+\]
+
+### Equality example
+
+\[
+Q=\begin{bmatrix}4&1\\1&2\end{bmatrix},\quad
+c=(-1,-1),\quad x_1+x_2=1,\quad x\ge0.
+\]
+
+Expected solution:
+
+\[
+x^\star=(0.25,0.75),\qquad f(x^\star)=-0.125.
+\]
+
+## Tests without platform natID binaries
+
+`tests/portable_natID` is a deliberately small, test-only implementation of
+the exact natID API subset used by this project. It lets CI or a non-Windows
+machine execute the same solver source when the actual binary SDK is
+unavailable. It is not used in a normal build and must not be used for
+performance comparisons.
+
+```bash
+cmake -S . -B build-portable \
+  -DNATID_QP_PORTABLE_TEST_BACKEND=ON \
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-portable
+ctest --test-dir build-portable --output-on-failure
+```
+
+## Plotting convergence
+
+After creating a CSV with `--csv`:
+
+```bash
+python scripts/plot_convergence.py convergence.csv -o convergence.png
+```
+
+The plot contains primal residual, dual residual, and complementarity on a
+logarithmic scale.
+
+## Numerical assumptions and limitations
+
+- The caller is responsible for supplying a convex QP: \(Q\succeq0\).
+- Constraint qualifications and a nonsingular reduced KKT system are assumed.
+- A small configurable primal diagonal regularization is added for numerical
+  stability.
+- This is an educational infeasible-start IPM, not a homogeneous
+  self-dual method. It does not produce formal infeasibility or unboundedness
+  certificates.
+- Problem matrices are stored densely for transparent residual validation.
+  The augmented KKT matrix is assembled sparsely, but \(G^\mathsf{T}S^{-1}ZG\)
+  can become dense.
+
+See [docs/ALGORITHM.md](docs/ALGORITHM.md) for the derivation and direct mapping
+from each mathematical step to the natID implementation.
+
+## References
+
+- J. Nocedal and S. J. Wright, *Numerical Optimization*, 2nd edition,
+  Chapter 16, Springer, 2006.
+- Y. Yan, [cppipm](https://github.com/YimingYAN/cppipm), an educational
+  interior-point implementation used as an algorithmic reference.
+- natID SDK headers and MatrixTests examples supplied with the project
+  materials.

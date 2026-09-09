@@ -1,0 +1,66 @@
+if(NATID_QP_PORTABLE_TEST_BACKEND)
+    message(STATUS "Skipping natid_qp_gui with the portable test backend.")
+    return()
+endif()
+
+if(NOT TARGET natid_qp_core)
+    message(FATAL_ERROR
+        "natid_qp_gui must be added from the NatIDQP root project, "
+        "after the natid_qp_core target is created."
+    )
+endif()
+
+include("${NATID_SDK_ROOT}/DevEnv/natGUI.cmake")
+
+set(NATID_QP_GUI_SOURCES
+    src/main.cpp
+)
+
+set(NATID_QP_GUI_HEADERS
+    src/Application.h
+    src/ConvergenceCanvas.h
+    src/DashboardView.h
+    src/MainWindow.h
+)
+
+set(NATID_QP_GUI_PLIST "${CMAKE_CURRENT_LIST_DIR}/src/Info.plist")
+
+add_executable(
+    natid_qp_gui
+    ${NATID_QP_GUI_SOURCES}
+    ${NATID_QP_GUI_HEADERS}
+)
+
+target_link_libraries(
+    natid_qp_gui
+    PRIVATE
+        natid_qp_core
+        debug ${NATGUI_LIB_DEBUG}
+        optimized ${NATGUI_LIB_RELEASE}
+)
+
+source_group("src" FILES ${NATID_QP_GUI_SOURCES})
+source_group("inc" FILES ${NATID_QP_GUI_HEADERS})
+
+setTargetPropertiesForGUIApp(natid_qp_gui "${NATID_QP_GUI_PLIST}")
+setIDEPropertiesForGUIExecutable(natid_qp_gui "${CMAKE_CURRENT_LIST_DIR}")
+
+# Common.cmake from some natID SDK packages does not forward the function's
+# devResPath argument into the Visual Studio debugger property. Set it
+# explicitly so F5 works immediately after CMake reconfiguration.
+if(WIN32)
+    set_target_properties(
+        natid_qp_gui
+        PROPERTIES
+            VS_DEBUGGER_COMMAND_ARGUMENTS
+                "-devResPath=${CMAKE_CURRENT_LIST_DIR}"
+    )
+endif()
+
+setPlatformDLLPath(natid_qp_gui)
+
+if(MSVC)
+    target_compile_options(natid_qp_gui PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(natid_qp_gui PRIVATE -Wall -Wextra -Wpedantic)
+endif()
