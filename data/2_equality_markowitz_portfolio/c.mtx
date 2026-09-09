@@ -1,0 +1,5 @@
+%%MatrixMarket matrix array real general
+% c = 0 (no expected-return term, min-variance formulation)
+2 1
+0
+0

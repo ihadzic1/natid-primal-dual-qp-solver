@@ -1,0 +1,9 @@
+%%MatrixMarket matrix coordinate real symmetric
+% Q za LASSO: min 0.5||Ax-b||^2+lambda||x||_1, x=u-v (u,v>=0), A=diag(2,3), b=[4,6], lambda=1
+4 4 6
+1 1 4
+1 2 -4
+2 2 4
+3 3 9
+3 4 -9
+4 4 9

@@ -1,0 +1,7 @@
+%%MatrixMarket matrix coordinate real symmetric
+% MPC, horizont N=2, x_{k+1}=x_k+u_k, cost sum(xk^2+0.1*uk^2), z=[x1,x2,u0,u1]
+4 4 4
+1 1 2
+2 2 2
+3 3 0.2
+4 4 0.2

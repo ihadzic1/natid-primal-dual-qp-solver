@@ -1,0 +1,9 @@
+%%MatrixMarket matrix coordinate real symmetric
+% Q = [[6,2,1],[2,5,2],[1,2,4]]  (Nocedal & Wright, Numerical Optimization, Ex. 16.2)
+3 3 6
+1 1 6
+1 2 2
+1 3 1
+2 2 5
+2 3 2
+3 3 4

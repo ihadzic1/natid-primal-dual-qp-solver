@@ -1,0 +1,5 @@
+%%MatrixMarket matrix coordinate real general
+% w1+w2 = 1 (fully invested budget constraint)
+1 2 2
+1 1 1
+1 2 1

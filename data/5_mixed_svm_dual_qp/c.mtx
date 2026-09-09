@@ -1,0 +1,5 @@
+%%MatrixMarket matrix array real general
+% c = -1 (dual: min 0.5 a'Qa - sum a_i)
+2 1
+-1
+-1

@@ -1,0 +1,5 @@
+%%MatrixMarket matrix coordinate real symmetric
+% Q = 2*I  <=>  objective (x1-1)^2+(x2-2.5)^2 (Nocedal & Wright, active-set QP example)
+2 2 2
+1 1 2
+2 2 2

@@ -10,7 +10,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
 #include <limits>
+#include <sstream>
 #include <vector>
 
 class ConvergenceCanvas final : public gui::Canvas
@@ -376,7 +378,7 @@ public:
     {
         enableResizeEvent(true);
         _summary = "Solver has not been run.";
-        _details = "Choose a demo problem.";
+        _details = "Choose a demo problem or a QP folder.";
         _message = "";
     }
 
@@ -407,12 +409,20 @@ public:
         _converged = solution.converged();
         _hasData = !_primal.empty();
 
-        double firstVariable = 0.0;
-        double secondVariable = 0.0;
-        if (solution.x.getNoOfRows() > 0)
-            firstVariable = solution.x.getFirstColumnManipulator()(0);
-        if (solution.x.getNoOfRows() > 1)
-            secondVariable = solution.x.getFirstColumnManipulator()(1);
+        std::ostringstream xPreview;
+        xPreview << '[' << std::setprecision(6);
+        const unsigned int variableCount = solution.x.getNoOfRows();
+        const unsigned int previewCount = std::min(variableCount, 4U);
+        const auto xValues = solution.x.getFirstColumnManipulator();
+        for (unsigned int index = 0; index < previewCount; ++index)
+        {
+            if (index > 0)
+                xPreview << ", ";
+            xPreview << xValues(index);
+        }
+        if (variableCount > previewCount)
+            xPreview << ", ...";
+        xPreview << ']';
 
         _summary.format(
             "%s | %s | iterations: %d | objective: %.12g",
@@ -422,12 +432,11 @@ public:
             solution.objective
         );
         _details.format(
-            "n=%llu, p=%llu, m=%llu | x = [%.9g, %.9g] | tolerance = %.3g",
+            "n=%llu, p=%llu, m=%llu | x = %s | tolerance = %.3g",
             static_cast<unsigned long long>(problem.variables()),
             static_cast<unsigned long long>(problem.equalities()),
             static_cast<unsigned long long>(problem.inequalities()),
-            firstVariable,
-            secondVariable,
+            xPreview.str().c_str(),
             tolerance
         );
         _message = solution.message.c_str();
@@ -444,7 +453,7 @@ public:
         _converged = false;
         _hasData = false;
         _summary = "Solver error";
-        _details = "The selected demo could not be solved.";
+        _details = "The selected QP input could not be loaded or solved.";
         _message = message;
         reDraw();
     }

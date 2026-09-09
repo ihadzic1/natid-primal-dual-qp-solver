@@ -1,0 +1,7 @@
+%%MatrixMarket matrix array real general
+% c = [-7,9,-17,19]  (z=[u1,v1,u2,v2])
+4 1
+-7
+9
+-17
+19

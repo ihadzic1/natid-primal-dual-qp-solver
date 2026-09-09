@@ -1,0 +1,6 @@
+%%MatrixMarket matrix array real general
+% c = [-8,-6,-4] (konstanta 9 izostavljena)
+3 1
+-8
+-6
+-4

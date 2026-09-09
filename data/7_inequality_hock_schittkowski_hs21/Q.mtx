@@ -1,0 +1,5 @@
+%%MatrixMarket matrix coordinate real symmetric
+% Q iz f(x)=0.01x1^2+x2^2-100 (HS21 test problem)
+2 2 2
+1 1 0.02
+2 2 2
