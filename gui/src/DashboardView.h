@@ -9,17 +9,39 @@
 #include <gui/Button.h>
 #include <gui/FileDialog.h>
 #include <gui/HorizontalLayout.h>
+#include <gui/Label.h>
+#include <gui/Slider.h>
 #include <gui/Timer.h>
 #include <gui/VerticalLayout.h>
 #include <gui/View.h>
 
+#include <algorithm>
 #include <exception>
 #include <filesystem>
 #include <string>
 
+class AnimationSpeedSlider final : public gui::Slider
+{
+protected:
+    void getMinSize(gui::Size& minSize) const override
+    {
+        minSize.width = 260.0;
+        minSize.height = 24.0;
+    }
+
+public:
+    AnimationSpeedSlider()
+    {
+        setRange(0.25, 3.0, 12);
+        setValue(1.0, false);
+        setToolTip("Animation speed (0.25x to 3.00x)");
+    }
+};
+
 class DashboardView final : public gui::View
 {
 private:
+    static constexpr double c_BasePlaybackIntervalSeconds = 0.7;
     static constexpr td::UINT4 c_QpFolderDialogID = 4101;
 
     gui::Button _inequalityButton;
@@ -29,9 +51,25 @@ private:
     gui::Button _nextStepButton;
     gui::Button _resetButton;
     gui::HorizontalLayout _buttonLayout;
+    gui::Label _speedLabel;
+    AnimationSpeedSlider _speedSlider;
+    gui::Label _speedValueLabel;
+    gui::HorizontalLayout _speedLayout;
     ConvergenceCanvas _chart;
     gui::VerticalLayout _layout;
     gui::Timer _playbackTimer;
+
+    void updatePlaybackSpeed()
+    {
+        const double speed = std::clamp(_speedSlider.getValue(), 0.25, 3.0);
+        _playbackTimer.setInterval(
+            static_cast<float>(c_BasePlaybackIntervalSeconds / speed)
+        );
+
+        td::String speedText;
+        speedText.format("%.2fx", speed);
+        _speedValueLabel.setTitle(speedText);
+    }
 
     void stopPlayback()
     {
@@ -176,8 +214,15 @@ public:
     , _nextStepButton("Next Step")
     , _resetButton("Reset")
     , _buttonLayout(7)
-    , _layout(2)
-    , _playbackTimer(this, 0.7f, false)
+    , _speedLabel("Animation speed:")
+    , _speedValueLabel("1.00x")
+    , _speedLayout(4)
+    , _layout(3)
+    , _playbackTimer(
+        this,
+        static_cast<float>(c_BasePlaybackIntervalSeconds),
+        false
+    )
     {
         _inequalityButton.setAsDefault();
 
@@ -191,7 +236,11 @@ public:
         _buttonLayout.appendSpacer();
         _buttonLayout.setSpaceBetweenCells(8);
 
-        _layout << _buttonLayout << _chart;
+        _speedLayout << _speedLabel << _speedSlider << _speedValueLabel;
+        _speedLayout.appendSpacer();
+        _speedLayout.setSpaceBetweenCells(8);
+
+        _layout << _buttonLayout << _speedLayout << _chart;
         _layout.setSpaceBetweenCells(10);
         setLayout(&_layout);
 
@@ -218,6 +267,10 @@ public:
         _resetButton.onClick([this]()
         {
             resetPlayback();
+        });
+        _speedSlider.onChangedValue([this]()
+        {
+            updatePlaybackSpeed();
         });
         _playbackTimer.onTimer([this]()
         {
