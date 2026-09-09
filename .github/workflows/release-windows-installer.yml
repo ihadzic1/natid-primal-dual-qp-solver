@@ -1,0 +1,189 @@
+name: Build NatIDQP Windows Installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish installer to GitHub Releases (yes/no)"
+        required: false
+        default: "no"
+      release_tag:
+        description: "Release tag when publishing manually (for example v1.0.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install natID SDK and utilities
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/idzafic/natID.git "$env:USERPROFILE\natID"
+          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.SDK" -Target "$env:USERPROFILE\natID\natID.SDK" | Out-Null
+          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.Utils" -Target "$env:USERPROFILE\natID\natID.Utils" | Out-Null
+
+          $archive = "$env:TEMP\natid-sdk-bin.7z"
+          curl.exe -L -o $archive https://github.com/idzafic/natID/releases/download/v4.2.1/bin_win_x64_20260710.7z
+
+          $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            choco install 7zip -y --no-progress
+          }
+          & $sevenZip x -y "-o$env:USERPROFILE\natID.SDK\bin" $archive
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract natID SDK binaries." }
+
+          if (-not (Test-Path "$env:USERPROFILE\natID.SDK\bin\mainUtils.dll")) {
+            throw "mainUtils.dll was not found after extracting the natID SDK binaries."
+          }
+
+      - name: Configure, build and test Release
+        shell: pwsh
+        run: |
+          $env:HOME = $env:USERPROFILE
+          $ramDiskBacking = "$env:USERPROFILE\natID.RAMDisk"
+          New-Item -ItemType Directory -Force -Path $ramDiskBacking | Out-Null
+          if (-not (Get-PSDrive -Name R -ErrorAction SilentlyContinue)) {
+            cmd /c "subst R: `"$ramDiskBacking`""
+          }
+
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Desktop" | Out-Null
+          $collectorSource = "$env:USERPROFILE\Desktop\NatIDQP-Packaging-Source"
+          New-Item -ItemType Junction -Path $collectorSource -Target $env:GITHUB_WORKSPACE | Out-Null
+
+          cmake -S $collectorSource -B R:\Out -A x64 `
+            "-DNATID_SDK_ROOT=$env:USERPROFILE\natID.SDK" `
+            "-DBUILD_TESTING=ON"
+          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
+
+          cmake --build R:\Out --config Release --target natid_qp_gui natid_qp_tests
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+
+          $env:PATH = "$env:USERPROFILE\natID.SDK\bin;$env:USERPROFILE\natID.SDK\bin\GTK;$env:PATH"
+          ctest --test-dir R:\Out -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "NatIDQP tests failed." }
+
+          $guiExecutable = "R:\Out\NatIDQP\Release\natid_qp_gui.exe"
+          if (-not (Test-Path $guiExecutable)) {
+            throw "Expected GUI executable was not produced at $guiExecutable"
+          }
+
+      - name: Collect the natID installer
+        shell: pwsh
+        run: |
+          $env:HOME = $env:USERPROFILE
+          $collectorSource = "$env:USERPROFILE\Desktop\NatIDQP-Packaging-Source"
+          if (-not (Test-Path $collectorSource)) {
+            throw "The packaging source junction was not created during configuration."
+          }
+
+          $setups = "$env:USERPROFILE\NatIDQP.Setups"
+          New-Item -ItemType Directory -Force -Path $setups | Out-Null
+          Copy-Item "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\*" $setups -Recurse -Force
+          Copy-Item "packaging\NatIDQP.xml" "$setups\NatIDQP.xml" -Force
+
+          # The collector reads package definitions from the SDK copy.
+          Copy-Item "packaging\GTK4.xml" `
+            "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\Packages\GTK4.xml" -Force
+
+          & "$env:USERPROFILE\natID.Utils\windows\SetupCollector.exe" "$setups\NatIDQP.xml"
+          if ($LASTEXITCODE -ne 0) { throw "natID SetupCollector failed." }
+
+          Get-ChildItem R:\Setup -Recurse | Select-Object FullName
+
+      - name: Stage and validate installer files
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "installer-output"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+
+          Get-ChildItem R:\Setup -File -Recurse |
+            Where-Object { $_.Extension -eq ".msi" -or $_.Name -like "Install*.exe" } |
+            Copy-Item -Destination $output
+
+          $msi = Get-ChildItem $output -Filter *.msi
+          if (-not $msi) {
+            throw "No MSI was produced by SetupCollector."
+          }
+
+          $bootstrapper = @(Get-ChildItem $output -File -Filter "Install*.exe")
+          $msiPaths = @($msi | ForEach-Object { $_.FullName })
+
+          try {
+            if ($bootstrapper.Count -eq 0) {
+              throw "The optional installer bootstrapper EXE is unavailable."
+            }
+            $archiveInputs = @($msiPaths)
+            $archiveInputs += @($bootstrapper | ForEach-Object { $_.FullName })
+            Compress-Archive -Path $archiveInputs `
+              -DestinationPath "NatIDQP-Windows-Installer.zip" -Force
+          }
+          catch {
+            Write-Warning "The unsigned bootstrapper was blocked; packaging the MSI only."
+            if (Test-Path "NatIDQP-Windows-Installer.zip") {
+              Remove-Item "NatIDQP-Windows-Installer.zip" -Force
+            }
+            Compress-Archive -Path $msiPaths `
+              -DestinationPath "NatIDQP-Windows-Installer.zip" -Force
+          }
+          Get-ChildItem $output
+          Get-Item "NatIDQP-Windows-Installer.zip"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NatIDQP-Windows-Installer
+          path: NatIDQP-Windows-Installer.zip
+          if-no-files-found: error
+
+  release:
+    needs: windows-installer
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'yes')
+
+    steps:
+      - name: Determine release tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            if [ -z "${{ github.event.inputs.release_tag }}" ]; then
+              echo "release_tag is required when publish_release=yes" >&2
+              exit 1
+            fi
+            echo "name=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: NatIDQP-Windows-Installer
+          path: artifacts/NatIDQP-Windows-Installer
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: NatIDQP ${{ steps.tag.outputs.name }}
+          body: |
+            ## NatIDQP Windows installer
+
+            Download and extract `NatIDQP-Windows-Installer.zip`. Keep the
+            `.exe` and `.msi` together, then run the installer `.exe`.
+
+            NatIDQP is a primal-dual interior-point solver for convex quadratic
+            programming using natID sparse and dense matrices.
+          files: artifacts/NatIDQP-Windows-Installer/NatIDQP-Windows-Installer.zip

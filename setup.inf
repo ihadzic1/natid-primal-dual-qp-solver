@@ -1,0 +1,89 @@
+;*** BEGIN **********************************************************
+;**                                                                **
+;** Automatically generated on: Wed Sep 09 14:02:49 2026           **
+;**                                                                **
+;** MakeCAB Version: 5.00                                 **
+;**                                                                **
+;*** BEGIN **********************************************************
+[disk list]
+1,Disk 1
+[cabinet list]
+1,1,Data.cab
+[file list]
+1,1,adwaita_1_0.dll,2621440
+1,1,cairo_2.dll,1360384
+1,1,cairo_gobject_2.dll,30720
+1,1,cairo_script_interpreter_2.dll,151552
+1,1,dataProvider.dll,1354752
+1,1,epoxy_0.dll,1589248
+1,1,ffi_8.dll,31744
+1,1,fontconfig_1.dll,1565696
+1,1,freetype_6.dll,786432
+1,1,fribidi_0.dll,134144
+1,1,gdk_pixbuf_2.0_0.dll,202752
+1,1,gio_2.0_0.dll,2447360
+1,1,girepository_2.0_0.dll,245760
+1,1,glib_2.0_0.dll,1494016
+1,1,gmodule_2.0_0.dll,24576
+1,1,gobject_2.0_0.dll,347136
+1,1,graphene_1.0_0.dll,105472
+1,1,gthread_2.0_0.dll,13312
+1,1,gtk_4_1.dll,11396096
+1,1,harfbuzz_cairo.dll,75776
+1,1,harfbuzz_gobject.dll,92672
+1,1,harfbuzz_gpu.dll,133632
+1,1,harfbuzz_raster.dll,297984
+1,1,harfbuzz_subset.dll,4135936
+1,1,harfbuzz_vector.dll,180736
+1,1,harfbuzz.dll,2681856
+1,1,iconv.dll,62976
+1,1,intl_8.dll,13312
+1,1,jpeg62.dll,1025024
+1,1,libexpat.dll,209920
+1,1,libpng16.dll,260608
+1,1,mainUtils.dll,470016
+1,1,Matrix.dll,12925440
+1,1,natGUI.dll,1829376
+1,1,natid_qp_gui.exe,171520
+1,1,pango_1.0_0.dll,429056
+1,1,pangocairo_1.0_0.dll,73216
+1,1,pangoft2_1.0_0.dll,103424
+1,1,pangowin32_1.0_0.dll,77312
+1,1,pcre2_16_0.dll,361984
+1,1,pcre2_32_0.dll,355840
+1,1,pcre2_8_0.dll,388608
+1,1,pcre2_posix_3.dll,14848
+1,1,pixman_1_0.dll,708608
+1,1,pkgconf_7.dll,82944
+1,1,res_DepRes.xml,865
+1,1,res_images_1.png,237
+1,1,res_images_2.png,2566
+1,1,res_images_3.png,3191
+1,1,res_images_4.png,2113
+1,1,res_License.txt,1101
+1,1,res_regionals_BA.xml,1204
+1,1,res_regionals_EN.xml,1198
+1,1,res_schemas_gschema.dtd,2917
+1,1,res_schemas_gschemas.compiled,2808
+1,1,res_schemas_org.gtk.gtk4.Inspector.gschema.xml,1239
+1,1,res_schemas_org.gtk.gtk4.Settings.ColorChooser.gschema.xml,941
+1,1,res_schemas_org.gtk.gtk4.Settings.Debug.gschema.xml,840
+1,1,res_schemas_org.gtk.gtk4.Settings.EmojiChooser.gschema.xml,678
+1,1,res_schemas_org.gtk.gtk4.Settings.FileChooser.gschema.xml,6537
+1,1,res_sounds_1.wav,14464
+1,1,res_symbols_1.xml,538
+1,1,res_symbols_2.xml,444
+1,1,res_tr_BA.xml,2003
+1,1,res_tr_EN.xml,1894
+1,1,rsvg_2_2.dll,31919616
+1,1,sass.dll,2725376
+1,1,symbSolvers.dll,881152
+1,1,tiff.dll,584704
+1,1,turbojpeg.dll,2002432
+1,1,xml2_16.dll,1327616
+1,1,zlib1.dll,89600
+;*** END ************************************************************
+;**                                                                **
+;** Automatically generated on: Wed Sep 09 14:02:49 2026           **
+;**                                                                **
+;*** END ************************************************************
