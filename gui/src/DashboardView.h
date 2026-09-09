@@ -10,14 +10,17 @@
 #include <gui/FileDialog.h>
 #include <gui/HorizontalLayout.h>
 #include <gui/Label.h>
+#include <gui/NumericEdit.h>
 #include <gui/Slider.h>
 #include <gui/Timer.h>
 #include <gui/VerticalLayout.h>
 #include <gui/View.h>
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 
 class AnimationSpeedSlider final : public gui::Slider
@@ -41,23 +44,36 @@ public:
 class DashboardView final : public gui::View
 {
 private:
+    enum class ProblemSource
+    {
+        None,
+        InequalityDemo,
+        EqualityDemo,
+        Folder
+    };
+
     static constexpr double c_BasePlaybackIntervalSeconds = 0.7;
     static constexpr td::UINT4 c_QpFolderDialogID = 4101;
 
     gui::Button _inequalityButton;
     gui::Button _equalityButton;
     gui::Button _chooseFolderButton;
+    gui::Button _runAgainButton;
     gui::Button _playPauseButton;
     gui::Button _nextStepButton;
     gui::Button _resetButton;
     gui::HorizontalLayout _buttonLayout;
+    gui::Label _toleranceLabel;
+    gui::NumericEdit _toleranceEdit;
     gui::Label _speedLabel;
     AnimationSpeedSlider _speedSlider;
     gui::Label _speedValueLabel;
-    gui::HorizontalLayout _speedLayout;
+    gui::HorizontalLayout _settingsLayout;
     ConvergenceCanvas _chart;
     gui::VerticalLayout _layout;
     gui::Timer _playbackTimer;
+    ProblemSource _problemSource = ProblemSource::None;
+    std::filesystem::path _selectedFolder;
 
     void updatePlaybackSpeed()
     {
@@ -110,11 +126,19 @@ private:
         _chart.resetPlayback();
     }
 
-    static natid_qp::SolverOptions solverOptions()
+    natid_qp::SolverOptions solverOptions() const
     {
         natid_qp::SolverOptions options;
         options.maxIterations = 100;
-        options.tolerance = 1e-9;
+        options.tolerance = _toleranceEdit.getValue().r8Val();
+        if (!std::isfinite(options.tolerance)
+            || options.tolerance < 1e-12
+            || options.tolerance > 1.0)
+        {
+            throw std::invalid_argument(
+                "Tolerance (threshold) must be between 1e-12 and 1.0."
+            );
+        }
         options.verbose = false;
         options.printKkt = false;
         return options;
@@ -154,6 +178,10 @@ private:
 
     void solveDemo(const bool equalityDemo)
     {
+        _problemSource = equalityDemo
+            ? ProblemSource::EqualityDemo
+            : ProblemSource::InequalityDemo;
+
         const natid_qp::QPProblem problem = equalityDemo
             ? natid_qp::makeEqualityDemoProblem()
             : natid_qp::makeInequalityDemoProblem();
@@ -162,6 +190,50 @@ private:
             problem,
             equalityDemo ? "Equality demo" : "Inequality demo"
         );
+    }
+
+    void solveSelectedFolder()
+    {
+        try
+        {
+            const natid_qp::QPProblem problem =
+                natid_qp::loadProblemDirectory(_selectedFolder);
+
+            std::string displayName = _selectedFolder.filename().string();
+            if (displayName.empty())
+                displayName = _selectedFolder.string();
+
+            solveProblem(problem, "QP folder: " + displayName);
+        }
+        catch (const std::exception& error)
+        {
+            stopPlayback();
+            _chart.setError(error.what());
+        }
+        catch (...)
+        {
+            stopPlayback();
+            _chart.setError("Unknown error while loading the selected QP folder.");
+        }
+    }
+
+    void runCurrentProblemAgain()
+    {
+        switch (_problemSource)
+        {
+            case ProblemSource::InequalityDemo:
+                solveDemo(false);
+                break;
+            case ProblemSource::EqualityDemo:
+                solveDemo(true);
+                break;
+            case ProblemSource::Folder:
+                solveSelectedFolder();
+                break;
+            case ProblemSource::None:
+                _chart.setError("Choose a demo problem or a QP folder first.");
+                break;
+        }
     }
 
     void chooseProblemFolder()
@@ -179,26 +251,9 @@ private:
                 if (selectedFolder.isEmpty())
                     return;
 
-                try
-                {
-                    const std::filesystem::path folder(selectedFolder.c_str());
-                    const natid_qp::QPProblem problem =
-                        natid_qp::loadProblemDirectory(folder);
-
-                    std::string displayName = folder.filename().string();
-                    if (displayName.empty())
-                        displayName = folder.string();
-
-                    solveProblem(problem, "QP folder: " + displayName);
-                }
-                catch (const std::exception& error)
-                {
-                    _chart.setError(error.what());
-                }
-                catch (...)
-                {
-                    _chart.setError("Unknown error while loading the selected QP folder.");
-                }
+                _selectedFolder = std::filesystem::path(selectedFolder.c_str());
+                _problemSource = ProblemSource::Folder;
+                solveSelectedFolder();
             },
             "Choose"
         );
@@ -210,13 +265,22 @@ public:
     , _inequalityButton("Inequality demo")
     , _equalityButton("Equality demo")
     , _chooseFolderButton("Choose QP Folder")
+    , _runAgainButton("Run Again")
     , _playPauseButton("Play")
     , _nextStepButton("Next Step")
     , _resetButton("Reset")
-    , _buttonLayout(7)
+    , _buttonLayout(8)
+    , _toleranceLabel("Tolerance (threshold):")
+    , _toleranceEdit(
+        td::real8,
+        gui::LineEdit::Messages::DoNotSend,
+        false,
+        "Solver convergence tolerance (1e-12 to 1.0)",
+        3
+    )
     , _speedLabel("Animation speed:")
     , _speedValueLabel("1.00x")
-    , _speedLayout(4)
+    , _settingsLayout(6)
     , _layout(3)
     , _playbackTimer(
         this,
@@ -230,17 +294,29 @@ public:
             << _inequalityButton
             << _equalityButton
             << _chooseFolderButton
+            << _runAgainButton
             << _playPauseButton
             << _nextStepButton
             << _resetButton;
         _buttonLayout.appendSpacer();
         _buttonLayout.setSpaceBetweenCells(8);
 
-        _speedLayout << _speedLabel << _speedSlider << _speedValueLabel;
-        _speedLayout.appendSpacer();
-        _speedLayout.setSpaceBetweenCells(8);
+        _toleranceEdit.setFormat(td::FormatFloat::Scientific);
+        _toleranceEdit.setMinValue(1e-12);
+        _toleranceEdit.setMaxValue(1.0);
+        _toleranceEdit.setValue(1e-9);
 
-        _layout << _buttonLayout << _speedLayout << _chart;
+        _settingsLayout
+            << _toleranceLabel
+            << _toleranceEdit;
+        _settingsLayout.appendSpacer();
+        _settingsLayout
+            << _speedLabel
+            << _speedSlider
+            << _speedValueLabel;
+        _settingsLayout.setSpaceBetweenCells(8);
+
+        _layout << _buttonLayout << _settingsLayout << _chart;
         _layout.setSpaceBetweenCells(10);
         setLayout(&_layout);
 
@@ -255,6 +331,10 @@ public:
         _chooseFolderButton.onClick([this]()
         {
             chooseProblemFolder();
+        });
+        _runAgainButton.onClick([this]()
+        {
+            runCurrentProblemAgain();
         });
         _playPauseButton.onClick([this]()
         {
@@ -271,6 +351,10 @@ public:
         _speedSlider.onChangedValue([this]()
         {
             updatePlaybackSpeed();
+        });
+        _toleranceEdit.onActivate([this]()
+        {
+            runCurrentProblemAgain();
         });
         _playbackTimer.onTimer([this]()
         {
