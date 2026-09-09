@@ -24,5 +24,6 @@
            win:headerTxtColor="#FFFFFF"
            win:licenseTxtColor="#404040"
            win:useMakeCabinet="true"
-           win:minBuildNumber="17763"/>
+           win:minBuildNumber="17763"
+           lin:depends="$DepGTKv4"/>
 </SetupCollector>

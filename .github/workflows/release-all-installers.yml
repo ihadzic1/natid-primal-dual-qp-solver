@@ -1,0 +1,318 @@
+name: Build NatIDQP Installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish installers to GitHub Releases (yes/no)"
+        required: false
+        default: "no"
+      release_tag:
+        description: "Release tag when publishing manually (for example v1.0.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install natID SDK and utilities
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/idzafic/natID.git "$env:USERPROFILE\natID"
+          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.SDK" -Target "$env:USERPROFILE\natID\natID.SDK" | Out-Null
+          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.Utils" -Target "$env:USERPROFILE\natID\natID.Utils" | Out-Null
+
+          $archive = "$env:TEMP\natid-sdk-bin.7z"
+          curl.exe -L -o $archive https://github.com/idzafic/natID/releases/download/v4.2.1/bin_win_x64_20260710.7z
+          $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            choco install 7zip -y --no-progress
+          }
+          & $sevenZip x -y "-o$env:USERPROFILE\natID.SDK\bin" $archive
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract natID SDK binaries." }
+
+      - name: Configure, build and test Release
+        shell: pwsh
+        run: |
+          $env:HOME = $env:USERPROFILE
+          $ramDiskBacking = "$env:USERPROFILE\natID.RAMDisk"
+          New-Item -ItemType Directory -Force -Path $ramDiskBacking | Out-Null
+          if (-not (Get-PSDrive -Name R -ErrorAction SilentlyContinue)) {
+            cmd /c "subst R: `"$ramDiskBacking`""
+          }
+
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Desktop" | Out-Null
+          $collectorSource = "$env:USERPROFILE\Desktop\NatIDQP-Packaging-Source"
+          New-Item -ItemType Junction -Path $collectorSource -Target $env:GITHUB_WORKSPACE | Out-Null
+
+          cmake -S $collectorSource -B R:\Out -A x64 "-DNATID_SDK_ROOT=$env:USERPROFILE\natID.SDK" "-DBUILD_TESTING=ON"
+          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
+          cmake --build R:\Out --config Release --target natid_qp_gui natid_qp_tests
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+
+          $env:PATH = "$env:USERPROFILE\natID.SDK\bin;$env:USERPROFILE\natID.SDK\bin\GTK;$env:PATH"
+          ctest --test-dir R:\Out -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "NatIDQP tests failed." }
+          if (-not (Test-Path "R:\Out\NatIDQP\Release\natid_qp_gui.exe")) {
+            throw "The Windows GUI executable was not produced."
+          }
+
+      - name: Collect Windows installer
+        shell: pwsh
+        run: |
+          $env:HOME = $env:USERPROFILE
+          $setups = "$env:USERPROFILE\NatIDQP.Setups"
+          New-Item -ItemType Directory -Force -Path $setups | Out-Null
+          Copy-Item "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\*" $setups -Recurse -Force
+          Copy-Item "packaging\NatIDQP.xml" "$setups\NatIDQP.xml" -Force
+          Copy-Item "packaging\GTK4.xml" "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\Packages\GTK4.xml" -Force
+
+          & "$env:USERPROFILE\natID.Utils\windows\SetupCollector.exe" "$setups\NatIDQP.xml"
+          if ($LASTEXITCODE -ne 0) { throw "natID SetupCollector failed." }
+
+      - name: Stage Windows installer
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:GITHUB_WORKSPACE "installer-output"
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          Get-ChildItem R:\Setup -File -Recurse |
+            Where-Object { $_.Extension -eq ".msi" -or $_.Name -like "Install*.exe" } |
+            Copy-Item -Destination $output
+
+          $msi = @(Get-ChildItem $output -File -Filter *.msi)
+          if ($msi.Count -eq 0) { throw "No MSI was produced by SetupCollector." }
+          $bootstrapper = @(Get-ChildItem $output -File -Filter "Install*.exe")
+          $msiPaths = @($msi | ForEach-Object { $_.FullName })
+
+          try {
+            if ($bootstrapper.Count -eq 0) {
+              throw "The optional installer bootstrapper EXE is unavailable."
+            }
+            $archiveInputs = @($msiPaths)
+            $archiveInputs += @($bootstrapper | ForEach-Object { $_.FullName })
+            Compress-Archive -Path $archiveInputs -DestinationPath "NatIDQP-Windows.zip" -Force
+          }
+          catch {
+            Write-Warning "The unsigned bootstrapper was blocked; packaging the MSI only."
+            if (Test-Path "NatIDQP-Windows.zip") {
+              Remove-Item "NatIDQP-Windows.zip" -Force
+            }
+            Compress-Archive -Path $msiPaths -DestinationPath "NatIDQP-Windows.zip" -Force
+          }
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NatIDQP-Windows
+          path: NatIDQP-Windows.zip
+          if-no-files-found: error
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            sdk_arch: arm64
+            collector_arch: arm64
+            label: Silicon
+          - runner: macos-15-intel
+            sdk_arch: x64
+            collector_arch: x64
+            label: Intel
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install natID SDK and utilities
+        run: |
+          git clone --depth 1 https://github.com/idzafic/natID.git "$HOME/natID"
+          ln -s "$HOME/natID/natID.SDK" "$HOME/natID.SDK"
+          ln -s "$HOME/natID/natID.Utils" "$HOME/natID.Utils"
+          brew install sevenzip
+          curl -L -o /tmp/natid-sdk-bin.7z \
+            "https://github.com/idzafic/natID/releases/download/v4.2.1/bin_macOS_${{ matrix.sdk_arch }}_20260710.7z"
+          7zz x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk-bin.7z
+
+      - name: Place project for SetupCollector
+        run: |
+          mkdir -p "$HOME/Desktop"
+          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/NatIDQP-Packaging-Source"
+
+      - name: Configure, build and test Release
+        run: |
+          cmake -S "$HOME/Desktop/NatIDQP-Packaging-Source" \
+            -B "$HOME/natID.RAMDisk/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNATID_SDK_ROOT="$HOME/natID.SDK" \
+            -DBUILD_TESTING=ON
+          cmake --build "$HOME/natID.RAMDisk/build" \
+            --target natid_qp_gui natid_qp_tests \
+            -j"$(sysctl -n hw.logicalcpu)"
+          export DYLD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:$DYLD_LIBRARY_PATH"
+          ctest --test-dir "$HOME/natID.RAMDisk/build" --output-on-failure
+          test -f "$HOME/natID.RAMDisk/Out/NatIDQP/Release/natid_qp_gui.app/Contents/MacOS/natid_qp_gui"
+
+      - name: Collect macOS app
+        run: |
+          sudo ln -s "$HOME/natID.RAMDisk" /Volumes/RAMDisk
+          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
+          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          chmod +x "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector"
+          "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector" \
+            "$HOME/NatIDQP.Setups/NatIDQP.xml"
+
+      - name: Stage, sign and archive macOS app
+        run: |
+          output="$GITHUB_WORKSPACE/installer-output"
+          mkdir -p "$output"
+          bundle="$(find "$HOME/natID.RAMDisk/Setup" -type d -name "*.app" -print -quit)"
+          if [ -z "$bundle" ]; then
+            echo "No macOS app bundle was produced by SetupCollector." >&2
+            exit 1
+          fi
+          cp -R "$bundle" "$output/"
+          app="$output/$(basename "$bundle")"
+          codesign --force --deep --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xattr -cr "$app"
+          cd "$output"
+          ditto -c -k --keepParent --sequesterRsrc \
+            "$(basename "$app")" \
+            "NatIDQP-macOS-${{ matrix.label }}.zip"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NatIDQP-macOS-${{ matrix.label }}
+          path: installer-output/NatIDQP-macOS-${{ matrix.label }}.zip
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git p7zip-full zip \
+            libgtk-4-dev libadwaita-1-dev
+
+      - name: Install natID SDK and utilities
+        run: |
+          git clone --depth 1 https://github.com/idzafic/natID.git "$HOME/natID"
+          ln -s "$HOME/natID/natID.SDK" "$HOME/natID.SDK"
+          ln -s "$HOME/natID/natID.Utils" "$HOME/natID.Utils"
+          curl -L -o /tmp/natid-sdk-bin.7z \
+            https://github.com/idzafic/natID/releases/download/v4.2.1/bin_linux_x64_20260710.7z
+          7z x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk-bin.7z
+
+      - name: Place project for SetupCollector
+        run: |
+          mkdir -p "$HOME/Desktop"
+          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/NatIDQP-Packaging-Source"
+
+      - name: Configure, build and test Release
+        run: |
+          cmake -S "$HOME/Desktop/NatIDQP-Packaging-Source" \
+            -B "$HOME/natID.RAMDisk/build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNATID_SDK_ROOT="$HOME/natID.SDK" \
+            -DBUILD_TESTING=ON
+          cmake --build "$HOME/natID.RAMDisk/build" \
+            --target natid_qp_gui natid_qp_tests \
+            -j"$(nproc)"
+          export LD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:$LD_LIBRARY_PATH"
+          ctest --test-dir "$HOME/natID.RAMDisk/build" --output-on-failure
+          test -f "$HOME/natID.RAMDisk/Out/NatIDQP/Release/natid_qp_gui"
+
+      - name: Collect Linux package
+        run: |
+          sudo mkdir -p /media
+          sudo ln -s "$HOME/natID.RAMDisk" /media/RAMDisk
+          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
+          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          chmod +x "$HOME/natID.Utils/linux/SetupCollector"
+          "$HOME/natID.Utils/linux/SetupCollector" "$HOME/NatIDQP.Setups/NatIDQP.xml"
+
+      - name: Stage and archive Linux package
+        run: |
+          output="$GITHUB_WORKSPACE/installer-output"
+          mkdir -p "$output"
+          find "$HOME/natID.RAMDisk/Setup" -type f -name "*.deb" \
+            -exec cp {} "$output/" \;
+          if ! find "$output" -maxdepth 1 -type f -name "*.deb" | grep -q .; then
+            echo "No Linux deb package was produced by SetupCollector." >&2
+            exit 1
+          fi
+          zip -j "$GITHUB_WORKSPACE/NatIDQP-Linux.zip" "$output"/*.deb
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NatIDQP-Linux
+          path: NatIDQP-Linux.zip
+          if-no-files-found: error
+
+  release:
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.publish_release == 'yes')
+
+    steps:
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            if [ -z "${{ github.event.inputs.release_tag }}" ]; then
+              echo "release_tag is required when publish_release=yes" >&2
+              exit 1
+            fi
+            echo "name=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: NatIDQP ${{ steps.tag.outputs.name }}
+          body: |
+            ## NatIDQP installers
+
+            - Windows: NatIDQP-Windows.zip
+            - macOS Apple Silicon: NatIDQP-macOS-Silicon.zip
+            - macOS Intel: NatIDQP-macOS-Intel.zip
+            - Linux Ubuntu 24.04+: NatIDQP-Linux.zip
+
+            The macOS bundles are ad-hoc signed but not Apple-notarized.
+            The Linux package is not repository-signed.
+          files: |
+            artifacts/NatIDQP-Windows/*
+            artifacts/NatIDQP-macOS-Silicon/*
+            artifacts/NatIDQP-macOS-Intel/*
+            artifacts/NatIDQP-Linux/*

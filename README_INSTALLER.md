@@ -1,8 +1,8 @@
-# NatIDQP Windows installer add-on
+# NatIDQP cross-platform installer add-on
 
 This add-on follows the supplied natID `SetupCollector` packaging example and
-creates a Windows installer pair (`Install*.exe` and `.msi`) for
-`natid_qp_gui`.
+creates installers for `natid_qp_gui` on Windows, macOS Apple Silicon, macOS
+Intel and Linux.
 
 ## Copy into the repository
 
@@ -11,7 +11,7 @@ Copy these three folders/files into the root of the NatIDQP repository:
 ```text
 NatIDQP/
 |-- .github/
-|   `-- workflows/release-windows-installer.yml
+|   `-- workflows/release-all-installers.yml
 |-- packaging/
 |   |-- NatIDQP.xml
 |   `-- GTK4.xml
@@ -21,6 +21,11 @@ NatIDQP/
 
 Merge the folders with existing `.github`, `packaging`, and `scripts` folders;
 do not put `NatIDQP_Installer_Addon` itself inside the repository.
+
+If the earlier Windows-only add-on is already present, delete
+`.github/workflows/release-windows-installer.yml`. The new
+`release-all-installers.yml` replaces it and otherwise both workflows would
+run for the same version tag.
 
 Append the two entries from `GITIGNORE_SNIPPET.txt` to the repository's
 existing `.gitignore` so locally generated installer files are not committed.
@@ -67,11 +72,19 @@ script does not weaken antivirus protection: it automatically falls back to a
 safe MSI-only ZIP. The MSI is the actual Windows installer and remains usable
 on systems with the required Visual C++ runtime.
 
-## Build using GitHub Actions
+## Build all platforms using GitHub Actions
 
-After committing the add-on, open **Actions > Build NatIDQP Windows Installer >
-Run workflow**. The resulting `NatIDQP-Windows-Installer` artifact can be
-downloaded without publishing a release.
+After committing the add-on, open **Actions > Build NatIDQP Installers > Run
+workflow**. One workflow run builds and tests all supported targets and creates:
+
+- `NatIDQP-Windows.zip` containing the EXE and MSI, or MSI only if Windows
+  Security blocks the unsigned bootstrapper;
+- `NatIDQP-macOS-Silicon.zip` for Apple Silicon Macs;
+- `NatIDQP-macOS-Intel.zip` for Intel Macs;
+- `NatIDQP-Linux.zip` containing the Ubuntu 24.04+ DEB package.
+
+macOS and Linux packages must be built on their respective GitHub-hosted
+runners; the local PowerShell script builds only the Windows installer.
 
 To create a GitHub Release automatically, push a version tag:
 
@@ -80,9 +93,10 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The workflow builds Release x64, executes `natid_qp_tests`, runs natID
-`SetupCollector`, validates that both installer files exist, zips them and
-attaches the ZIP to the tagged GitHub Release.
+The workflow builds Release, executes `natid_qp_tests`, runs natID
+`SetupCollector`, validates every platform package and attaches all four ZIP
+files to the tagged GitHub Release. macOS bundles are ad-hoc signed but not
+Apple-notarized, and the Linux DEB is not repository-signed.
 
 ## Runtime dependencies included
 
