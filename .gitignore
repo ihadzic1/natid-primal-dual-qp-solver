@@ -16,3 +16,6 @@ solution.txt
 /solution/
 __pycache__/
 *.pyc
+# Locally generated NatIDQP installer artifacts
+installer-output/
+NatIDQP-Windows-Installer.zip
