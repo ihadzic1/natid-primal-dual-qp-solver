@@ -9,6 +9,7 @@
 #include <gui/Button.h>
 #include <gui/FileDialog.h>
 #include <gui/HorizontalLayout.h>
+#include <gui/Timer.h>
 #include <gui/VerticalLayout.h>
 #include <gui/View.h>
 
@@ -24,9 +25,52 @@ private:
     gui::Button _inequalityButton;
     gui::Button _equalityButton;
     gui::Button _chooseFolderButton;
+    gui::Button _playPauseButton;
+    gui::Button _nextStepButton;
+    gui::Button _resetButton;
     gui::HorizontalLayout _buttonLayout;
     ConvergenceCanvas _chart;
     gui::VerticalLayout _layout;
+    gui::Timer _playbackTimer;
+
+    void stopPlayback()
+    {
+        if (_playbackTimer.isRunning())
+            _playbackTimer.stop();
+        _playPauseButton.setTitle("Play");
+    }
+
+    void startPlayback()
+    {
+        if (!_chart.hasPlaybackData())
+            return;
+
+        if (_chart.isPlaybackComplete())
+            _chart.resetPlayback();
+
+        _playPauseButton.setTitle("Pause");
+        _playbackTimer.start();
+    }
+
+    void togglePlayback()
+    {
+        if (_playbackTimer.isRunning())
+            stopPlayback();
+        else
+            startPlayback();
+    }
+
+    void showNextStep()
+    {
+        stopPlayback();
+        _chart.advancePlayback();
+    }
+
+    void resetPlayback()
+    {
+        stopPlayback();
+        _chart.resetPlayback();
+    }
 
     static natid_qp::SolverOptions solverOptions()
     {
@@ -43,6 +87,8 @@ private:
         const std::string& problemName
     )
     {
+        stopPlayback();
+
         try
         {
             const natid_qp::SolverOptions options = solverOptions();
@@ -56,6 +102,7 @@ private:
                 problemName.c_str(),
                 options.tolerance
             );
+            startPlayback();
         }
         catch (const std::exception& error)
         {
@@ -125,15 +172,22 @@ public:
     , _inequalityButton("Inequality demo")
     , _equalityButton("Equality demo")
     , _chooseFolderButton("Choose QP Folder")
-    , _buttonLayout(4)
+    , _playPauseButton("Play")
+    , _nextStepButton("Next Step")
+    , _resetButton("Reset")
+    , _buttonLayout(7)
     , _layout(2)
+    , _playbackTimer(this, 0.7f, false)
     {
         _inequalityButton.setAsDefault();
 
         _buttonLayout
             << _inequalityButton
             << _equalityButton
-            << _chooseFolderButton;
+            << _chooseFolderButton
+            << _playPauseButton
+            << _nextStepButton
+            << _resetButton;
         _buttonLayout.appendSpacer();
         _buttonLayout.setSpaceBetweenCells(8);
 
@@ -152,6 +206,23 @@ public:
         _chooseFolderButton.onClick([this]()
         {
             chooseProblemFolder();
+        });
+        _playPauseButton.onClick([this]()
+        {
+            togglePlayback();
+        });
+        _nextStepButton.onClick([this]()
+        {
+            showNextStep();
+        });
+        _resetButton.onClick([this]()
+        {
+            resetPlayback();
+        });
+        _playbackTimer.onTimer([this]()
+        {
+            if (!_chart.advancePlayback())
+                stopPlayback();
         });
     }
 

@@ -23,12 +23,19 @@ private:
     std::vector<double> _primal;
     std::vector<double> _dual;
     std::vector<double> _mu;
+    std::vector<natid_qp::IterationStats> _history;
 
     td::String _problemName;
     td::String _summary;
     td::String _details;
     td::String _message;
+    td::String _finalStatus;
+    td::String _finalXPreview;
 
+    std::size_t _visiblePointCount = 0;
+    std::size_t _variables = 0;
+    std::size_t _equalities = 0;
+    std::size_t _inequalities = 0;
     double _toleranceLog = -8.0;
     double _yMinimum = -12.0;
     double _yMaximum = 1.0;
@@ -130,13 +137,15 @@ private:
     void drawSeries(
         const std::vector<double>& values,
         const gui::Rect& plot,
-        const td::ColorID color
+        const td::ColorID color,
+        const std::size_t visibleCount
     ) const
     {
-        if (values.empty())
+        const std::size_t count = std::min(visibleCount, values.size());
+        if (count == 0)
             return;
 
-        for (std::size_t index = 1; index < values.size(); ++index)
+        for (std::size_t index = 1; index < count; ++index)
         {
             const gui::Point previous(
                 mapX(index - 1, values.size(), plot),
@@ -149,7 +158,7 @@ private:
             gui::Shape::drawLine(previous, current, color, 2.5f);
         }
 
-        for (std::size_t index = 0; index < values.size(); ++index)
+        for (std::size_t index = 0; index < count; ++index)
         {
             const gui::Point point(
                 mapX(index, values.size(), plot),
@@ -275,9 +284,24 @@ private:
             td::LinePattern::Dash
         );
 
-        drawSeries(_primal, plot, td::ColorID::DodgerBlue);
-        drawSeries(_dual, plot, td::ColorID::Crimson);
-        drawSeries(_mu, plot, td::ColorID::Green);
+        drawSeries(
+            _primal,
+            plot,
+            td::ColorID::DodgerBlue,
+            _visiblePointCount
+        );
+        drawSeries(
+            _dual,
+            plot,
+            td::ColorID::Crimson,
+            _visiblePointCount
+        );
+        drawSeries(
+            _mu,
+            plot,
+            td::ColorID::Green,
+            _visiblePointCount
+        );
 
         const td::String xAxis("iteration");
         drawText(
@@ -313,6 +337,45 @@ private:
         );
     }
 
+    void updatePlaybackText()
+    {
+        if (_history.empty() || _visiblePointCount == 0)
+            return;
+
+        const std::size_t index =
+            std::min(_visiblePointCount, _history.size()) - 1;
+        const natid_qp::IterationStats& stats = _history[index];
+        const natid_qp::IterationStats& finalStats = _history.back();
+
+        _summary.format(
+            "%s | step %d/%d | objective: %.12g",
+            _problemName.c_str(),
+            stats.iteration,
+            finalStats.iteration,
+            stats.objective
+        );
+        _details.format(
+            "primal: %.3e | dual: %.3e | mu: %.3e | gap: %.3e",
+            stats.primalResidual,
+            stats.dualResidual,
+            stats.mu,
+            stats.dualityGap
+        );
+        _message.format(
+            "a_pri: %.4f | a_dual: %.4f | sigma: %.3g | KKT nnz: %llu | "
+            "n=%llu, p=%llu, m=%llu | final: %s | x(final)=%s",
+            stats.alphaPrimal,
+            stats.alphaDual,
+            stats.sigma,
+            static_cast<unsigned long long>(stats.kktNonZeros),
+            static_cast<unsigned long long>(_variables),
+            static_cast<unsigned long long>(_equalities),
+            static_cast<unsigned long long>(_inequalities),
+            _finalStatus.c_str(),
+            _finalXPreview.c_str()
+        );
+    }
+
 protected:
     void onDraw(const gui::Rect&) override
     {
@@ -332,8 +395,11 @@ protected:
             td::ColorID::SysText
         );
 
-        const td::ColorID statusColor =
-            _converged ? td::ColorID::Green : td::ColorID::Crimson;
+        const bool playbackComplete =
+            _hasData && _visiblePointCount >= _history.size();
+        const td::ColorID statusColor = playbackComplete
+            ? (_converged ? td::ColorID::Green : td::ColorID::Crimson)
+            : td::ColorID::DarkOrange;
         gui::Shape::drawRect(gui::Rect(23.0, 51.0, 31.0, 59.0), statusColor);
 
         drawText(
@@ -392,6 +458,7 @@ public:
         _primal.clear();
         _dual.clear();
         _mu.clear();
+        _history = solution.history;
 
         _primal.reserve(solution.history.size());
         _dual.reserve(solution.history.size());
@@ -405,9 +472,13 @@ public:
         }
 
         _problemName = problemName;
+        _variables = problem.variables();
+        _equalities = problem.equalities();
+        _inequalities = problem.inequalities();
         _toleranceLog = toLogValue(tolerance);
         _converged = solution.converged();
         _hasData = !_primal.empty();
+        _visiblePointCount = _hasData ? 1 : 0;
 
         std::ostringstream xPreview;
         xPreview << '[' << std::setprecision(6);
@@ -424,24 +495,41 @@ public:
             xPreview << ", ...";
         xPreview << ']';
 
-        _summary.format(
-            "%s | %s | iterations: %d | objective: %.12g",
-            _problemName.c_str(),
-            natid_qp::toString(solution.status),
-            solution.iterations,
-            solution.objective
-        );
-        _details.format(
-            "n=%llu, p=%llu, m=%llu | x = %s | tolerance = %.3g",
-            static_cast<unsigned long long>(problem.variables()),
-            static_cast<unsigned long long>(problem.equalities()),
-            static_cast<unsigned long long>(problem.inequalities()),
-            xPreview.str().c_str(),
-            tolerance
-        );
-        _message = solution.message.c_str();
+        _finalStatus = natid_qp::toString(solution.status);
+        _finalXPreview = xPreview.str().c_str();
 
         updateYRange();
+        updatePlaybackText();
+        reDraw();
+    }
+
+    [[nodiscard]] bool hasPlaybackData() const
+    {
+        return !_history.empty();
+    }
+
+    [[nodiscard]] bool isPlaybackComplete() const
+    {
+        return _history.empty() || _visiblePointCount >= _history.size();
+    }
+
+    bool advancePlayback()
+    {
+        if (_history.empty())
+            return false;
+
+        if (_visiblePointCount < _history.size())
+            ++_visiblePointCount;
+
+        updatePlaybackText();
+        reDraw();
+        return !isPlaybackComplete();
+    }
+
+    void resetPlayback()
+    {
+        _visiblePointCount = _history.empty() ? 0 : 1;
+        updatePlaybackText();
         reDraw();
     }
 
@@ -450,6 +538,8 @@ public:
         _primal.clear();
         _dual.clear();
         _mu.clear();
+        _history.clear();
+        _visiblePointCount = 0;
         _converged = false;
         _hasData = false;
         _summary = "Solver error";
