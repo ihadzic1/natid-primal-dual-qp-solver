@@ -526,6 +526,19 @@ public:
         return !isPlaybackComplete();
     }
 
+    bool retreatPlayback()
+    {
+        if (_history.empty())
+            return false;
+
+        if (_visiblePointCount > 1)
+            --_visiblePointCount;
+
+        updatePlaybackText();
+        reDraw();
+        return _visiblePointCount > 1;
+    }
+
     void resetPlayback()
     {
         _visiblePointCount = _history.empty() ? 0 : 1;

@@ -55,21 +55,26 @@ private:
     static constexpr double c_BasePlaybackIntervalSeconds = 0.7;
     static constexpr td::UINT4 c_QpFolderDialogID = 4101;
 
+    gui::Label _problemLabel;
     gui::Button _inequalityButton;
     gui::Button _equalityButton;
     gui::Button _chooseFolderButton;
-    gui::Button _runAgainButton;
-    gui::Button _playPauseButton;
-    gui::Button _nextStepButton;
-    gui::Button _resetButton;
-    gui::HorizontalLayout _buttonLayout;
+    gui::HorizontalLayout _problemLayout;
+    gui::Label _setupLabel;
     gui::Label _toleranceLabel;
     gui::NumericEdit _toleranceEdit;
+    gui::Button _runAgainButton;
+    gui::HorizontalLayout _setupLayout;
+    ConvergenceCanvas _chart;
+    gui::Label _animationLabel;
+    gui::Button _previousStepButton;
+    gui::Button _playPauseButton;
+    gui::Button _nextStepButton;
+    gui::Button _playAgainButton;
     gui::Label _speedLabel;
     AnimationSpeedSlider _speedSlider;
     gui::Label _speedValueLabel;
-    gui::HorizontalLayout _settingsLayout;
-    ConvergenceCanvas _chart;
+    gui::HorizontalLayout _animationLayout;
     gui::VerticalLayout _layout;
     gui::Timer _playbackTimer;
     ProblemSource _problemSource = ProblemSource::None;
@@ -120,10 +125,17 @@ private:
         _chart.advancePlayback();
     }
 
-    void resetPlayback()
+    void showPreviousStep()
+    {
+        stopPlayback();
+        _chart.retreatPlayback();
+    }
+
+    void playAgain()
     {
         stopPlayback();
         _chart.resetPlayback();
+        startPlayback();
     }
 
     natid_qp::SolverOptions solverOptions() const
@@ -262,14 +274,12 @@ private:
 public:
     DashboardView()
     : gui::View(12, 12, 12, 12)
+    , _problemLabel("QP problem:")
     , _inequalityButton("Inequality demo")
     , _equalityButton("Equality demo")
     , _chooseFolderButton("Choose QP Folder")
-    , _runAgainButton("Run Again")
-    , _playPauseButton("Play")
-    , _nextStepButton("Next Step")
-    , _resetButton("Reset")
-    , _buttonLayout(8)
+    , _problemLayout(5)
+    , _setupLabel("Solver setup:")
     , _toleranceLabel("Tolerance (threshold):")
     , _toleranceEdit(
         td::real8,
@@ -278,10 +288,17 @@ public:
         "Solver convergence tolerance (1e-12 to 1.0)",
         3
     )
+    , _runAgainButton("Run Again")
+    , _setupLayout(5)
+    , _animationLabel("Animation:")
+    , _previousStepButton("Previous Step")
+    , _playPauseButton("Play")
+    , _nextStepButton("Next Step")
+    , _playAgainButton("Play Again")
     , _speedLabel("Animation speed:")
     , _speedValueLabel("1.00x")
-    , _settingsLayout(6)
-    , _layout(3)
+    , _animationLayout(9)
+    , _layout(4)
     , _playbackTimer(
         this,
         static_cast<float>(c_BasePlaybackIntervalSeconds),
@@ -290,33 +307,45 @@ public:
     {
         _inequalityButton.setAsDefault();
 
-        _buttonLayout
+        _problemLayout
+            << _problemLabel
             << _inequalityButton
             << _equalityButton
-            << _chooseFolderButton
-            << _runAgainButton
-            << _playPauseButton
-            << _nextStepButton
-            << _resetButton;
-        _buttonLayout.appendSpacer();
-        _buttonLayout.setSpaceBetweenCells(8);
+            << _chooseFolderButton;
+        _problemLayout.appendSpacer();
+        _problemLayout.setSpaceBetweenCells(8);
 
         _toleranceEdit.setFormat(td::FormatFloat::Scientific);
         _toleranceEdit.setMinValue(1e-12);
         _toleranceEdit.setMaxValue(1.0);
         _toleranceEdit.setValue(1e-9);
 
-        _settingsLayout
+        _setupLayout
+            << _setupLabel
             << _toleranceLabel
-            << _toleranceEdit;
-        _settingsLayout.appendSpacer();
-        _settingsLayout
+            << _toleranceEdit
+            << _runAgainButton;
+        _setupLayout.appendSpacer();
+        _setupLayout.setSpaceBetweenCells(8);
+
+        _animationLayout
+            << _animationLabel
+            << _previousStepButton
+            << _playPauseButton
+            << _nextStepButton
+            << _playAgainButton;
+        _animationLayout.appendSpacer();
+        _animationLayout
             << _speedLabel
             << _speedSlider
             << _speedValueLabel;
-        _settingsLayout.setSpaceBetweenCells(8);
+        _animationLayout.setSpaceBetweenCells(8);
 
-        _layout << _buttonLayout << _settingsLayout << _chart;
+        _layout
+            << _problemLayout
+            << _setupLayout
+            << _animationLayout
+            << _chart;
         _layout.setSpaceBetweenCells(10);
         setLayout(&_layout);
 
@@ -344,9 +373,13 @@ public:
         {
             showNextStep();
         });
-        _resetButton.onClick([this]()
+        _previousStepButton.onClick([this]()
         {
-            resetPlayback();
+            showPreviousStep();
+        });
+        _playAgainButton.onClick([this]()
+        {
+            playAgain();
         });
         _speedSlider.onChangedValue([this]()
         {
