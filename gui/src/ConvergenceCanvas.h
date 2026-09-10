@@ -18,6 +18,15 @@
 
 class ConvergenceCanvas final : public gui::Canvas
 {
+public:
+    enum class ScaleMode
+    {
+        Linear = 0,
+        Log10,
+        AccuracyDigits,
+        EnhancedAccuracy
+    };
+
 private:
     static constexpr double c_LogFloor = -12.0;
 
@@ -39,9 +48,10 @@ private:
     std::size_t _variables = 0;
     std::size_t _equalities = 0;
     std::size_t _inequalities = 0;
-    double _toleranceLog = -8.0;
+    double _tolerance = 1e-8;
     double _yMinimum = -12.0;
     double _yMaximum = 1.0;
+    ScaleMode _scaleMode = ScaleMode::Log10;
     bool _converged = false;
     bool _hasData = false;
     natid_qp::MatchLevel _matchLevel = natid_qp::MatchLevel::NotCompared;
@@ -71,6 +81,46 @@ private:
         return std::max(c_LogFloor, std::log10(std::max(std::abs(value), 1e-12)));
     }
 
+    [[nodiscard]] double displayValue(const double value) const
+    {
+        if (!std::isfinite(value))
+            return _scaleMode == ScaleMode::Log10 ? c_LogFloor : 0.0;
+
+        if (_scaleMode == ScaleMode::Linear)
+            return std::abs(value);
+
+        const double logarithm = toLogValue(value);
+        if (_scaleMode == ScaleMode::Log10)
+            return logarithm;
+
+        const double accuracyDigits = -logarithm;
+        if (_scaleMode == ScaleMode::AccuracyDigits)
+            return accuracyDigits;
+
+        // Signed square preserves ordering on both sides of value=1 while
+        // strongly separating very small residuals near convergence.
+        return std::copysign(
+            accuracyDigits * accuracyDigits,
+            accuracyDigits
+        );
+    }
+
+    [[nodiscard]] const char* scaleAxisTitle() const
+    {
+        switch (_scaleMode)
+        {
+            case ScaleMode::Linear:
+                return "value";
+            case ScaleMode::Log10:
+                return "log10(value)";
+            case ScaleMode::AccuracyDigits:
+                return "accuracy (-log10)";
+            case ScaleMode::EnhancedAccuracy:
+                return "enhanced accuracy^2";
+        }
+        return "value";
+    }
+
     static gui::CoordType mapX(
         const std::size_t index,
         const std::size_t count,
@@ -95,15 +145,40 @@ private:
 
     void updateYRange()
     {
-        double minimum = _toleranceLog;
-        double maximum = _toleranceLog;
+        if (_scaleMode == ScaleMode::Linear)
+        {
+            double maximum = std::abs(_tolerance);
+            const auto inspectMaximum = [&maximum](const std::vector<double>& values)
+            {
+                for (const double value : values)
+                {
+                    if (std::isfinite(value))
+                        maximum = std::max(maximum, std::abs(value));
+                }
+            };
 
-        const auto inspect = [&minimum, &maximum](const std::vector<double>& values)
+            inspectMaximum(_primal);
+            inspectMaximum(_dual);
+            inspectMaximum(_mu);
+            _yMinimum = 0.0;
+            _yMaximum = maximum > std::numeric_limits<double>::epsilon()
+                ? 1.05 * maximum
+                : 1.0;
+            return;
+        }
+
+        double minimum = displayValue(_tolerance);
+        double maximum = displayValue(_tolerance);
+
+        const auto inspect = [this, &minimum, &maximum](
+            const std::vector<double>& values
+        )
         {
             for (const double value : values)
             {
-                minimum = std::min(minimum, value);
-                maximum = std::max(maximum, value);
+                const double displayed = displayValue(value);
+                minimum = std::min(minimum, displayed);
+                maximum = std::max(maximum, displayed);
             }
         };
 
@@ -171,11 +246,11 @@ private:
         {
             const gui::Point previous(
                 mapX(index - 1, values.size(), plot),
-                mapY(values[index - 1], plot)
+                mapY(displayValue(values[index - 1]), plot)
             );
             const gui::Point current(
                 mapX(index, values.size(), plot),
-                mapY(values[index], plot)
+                mapY(displayValue(values[index]), plot)
             );
             gui::Shape::drawLine(previous, current, color, 2.5f);
         }
@@ -184,7 +259,7 @@ private:
         {
             const gui::Point point(
                 mapX(index, values.size(), plot),
-                mapY(values[index], plot)
+                mapY(displayValue(values[index]), plot)
             );
             const gui::Rect marker(
                 point.x - 2.5,
@@ -245,7 +320,10 @@ private:
 
             const double value = _yMaximum - ratio * (_yMaximum - _yMinimum);
             td::String label;
-            label.format("%.1f", value);
+            if (_scaleMode == ScaleMode::Linear)
+                label.format("%.2e", value);
+            else
+                label.format("%.1f", value);
             drawText(
                 label,
                 gui::Rect(bounds.left + 5.0, y - 11.0, plot.left - 8.0, y + 11.0),
@@ -297,7 +375,7 @@ private:
 
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
-        const gui::CoordType toleranceY = mapY(_toleranceLog, plot);
+        const gui::CoordType toleranceY = mapY(displayValue(_tolerance), plot);
         gui::Shape::drawLine(
             gui::Point(plot.left, toleranceY),
             gui::Point(plot.right, toleranceY),
@@ -334,7 +412,7 @@ private:
             td::TextAlignment::Center
         );
 
-        const td::String yAxis("log10(value)");
+        const td::String yAxis(scaleAxisTitle());
         drawText(
             yAxis,
             gui::Rect(bounds.left + 6.0, plot.top - 28.0, plot.left + 110.0, plot.top - 4.0),
@@ -509,16 +587,16 @@ public:
 
         for (const natid_qp::IterationStats& stats : solution.history)
         {
-            _primal.push_back(toLogValue(stats.primalResidual));
-            _dual.push_back(toLogValue(stats.dualResidual));
-            _mu.push_back(toLogValue(stats.mu));
+            _primal.push_back(std::abs(stats.primalResidual));
+            _dual.push_back(std::abs(stats.dualResidual));
+            _mu.push_back(std::abs(stats.mu));
         }
 
         _problemName = problemName;
         _variables = problem.variables();
         _equalities = problem.equalities();
         _inequalities = problem.inequalities();
-        _toleranceLog = toLogValue(tolerance);
+        _tolerance = std::abs(tolerance);
         _converged = solution.converged();
         _hasData = !_primal.empty();
         _visiblePointCount = _hasData ? 1 : 0;
@@ -589,6 +667,21 @@ public:
         updateYRange();
         updatePlaybackText();
         reDraw();
+    }
+
+    void setScaleMode(const ScaleMode mode)
+    {
+        if (_scaleMode == mode)
+            return;
+
+        _scaleMode = mode;
+        updateYRange();
+        reDraw();
+    }
+
+    [[nodiscard]] ScaleMode getScaleMode() const
+    {
+        return _scaleMode;
     }
 
     [[nodiscard]] bool hasPlaybackData() const

@@ -8,6 +8,7 @@
 #include "natid_qp/QPProblem.h"
 
 #include <gui/Button.h>
+#include <gui/ComboBox.h>
 #include <gui/FileDialog.h>
 #include <gui/HorizontalLayout.h>
 #include <gui/Label.h>
@@ -29,7 +30,7 @@ class AnimationSpeedSlider final : public gui::Slider
 protected:
     void getMinSize(gui::Size& minSize) const override
     {
-        minSize.width = 260.0;
+        minSize.width = 180.0;
         minSize.height = 24.0;
     }
 
@@ -72,6 +73,8 @@ private:
     gui::Button _playPauseButton;
     gui::Button _nextStepButton;
     gui::Button _playAgainButton;
+    gui::Label _scaleLabel;
+    gui::ComboBox _scaleComboBox;
     gui::Label _speedLabel;
     AnimationSpeedSlider _speedSlider;
     gui::Label _speedValueLabel;
@@ -347,9 +350,11 @@ public:
     , _playPauseButton("Play")
     , _nextStepButton("Next Step")
     , _playAgainButton("Play Again")
+    , _scaleLabel("Y-axis mode:")
+    , _scaleComboBox("Convergence chart scale")
     , _speedLabel("Animation speed:")
     , _speedValueLabel("1.00x")
-    , _animationLayout(9)
+    , _animationLayout(11)
     , _layout(4)
     , _playbackTimer(
         this,
@@ -385,13 +390,22 @@ public:
             << _previousStepButton
             << _playPauseButton
             << _nextStepButton
-            << _playAgainButton;
+            << _playAgainButton
+            << _scaleLabel
+            << _scaleComboBox;
         _animationLayout.appendSpacer();
         _animationLayout
             << _speedLabel
             << _speedSlider
             << _speedValueLabel;
         _animationLayout.setSpaceBetweenCells(8);
+
+        _scaleComboBox.addItem("Linear");
+        _scaleComboBox.addItem("Log10");
+        _scaleComboBox.addItem("Accuracy (-log10)");
+        _scaleComboBox.addItem("Enhanced accuracy");
+        _scaleComboBox.selectIndex(1, false);
+        _scaleComboBox.sizeToFit();
 
         _layout
             << _problemLayout
@@ -432,6 +446,20 @@ public:
         _playAgainButton.onClick([this]()
         {
             playAgain();
+        });
+        _scaleComboBox.onChangedSelection([this]()
+        {
+            stopPlayback();
+            const int selectedIndex = std::clamp(
+                _scaleComboBox.getSelectedIndex(),
+                0,
+                3
+            );
+            _chart.setScaleMode(
+                static_cast<ConvergenceCanvas::ScaleMode>(selectedIndex)
+            );
+            _chart.resetPlayback();
+            startPlayback();
         });
         _speedSlider.onChangedValue([this]()
         {
