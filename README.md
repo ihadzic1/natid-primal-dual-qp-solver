@@ -157,7 +157,18 @@ horizontally like **A/D**. Click a plot to give it keyboard focus, then use
 **Ctrl++** or **Ctrl+-** to zoom around its center and the arrow keys or
 **W/A/S/D** to pan. **Ctrl+0** restores the full data range. Zooming, panning,
 and switching tabs do not change the current animation iteration; loading or
-running a problem again resets the viewport.
+running a problem again resets the viewport. Deep zoom is supported up to
+`1e12`, and axis labels automatically add decimal precision or switch to
+scientific notation as the visible range becomes smaller. In the two-variable
+objective plot, contour levels are fixed for the loaded solution (including
+one unique objective level for every recorded solver point), so zooming does
+not replace an iteration's iso-line with a different objective level. Fainter,
+evenly spaced background contours fill otherwise empty objective ranges, but
+a background level is omitted whenever its objective value is closer than 35%
+of the regular contour spacing to a solver level, avoiding visual duplicates.
+The objective legend distinguishes the single green optimum marker from
+orange dashed inequality constraints and crimson dash-dot equality constraints;
+the translucent green area remains the feasible region.
 
 ## Matrix Market convention
 

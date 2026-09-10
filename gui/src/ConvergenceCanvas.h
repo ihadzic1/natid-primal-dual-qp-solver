@@ -32,8 +32,8 @@ private:
     static constexpr double c_LogFloor = -12.0;
     static constexpr double c_KeyboardZoomFactor = 1.25;
     static constexpr double c_KeyboardPanFraction = 0.12;
-    static constexpr double c_MaximumZoom = 1'000'000.0;
-    static constexpr gui::CoordType c_LeftMargin = 78.0;
+    static constexpr double c_MaximumZoom = 1'000'000'000'000.0;
+    static constexpr gui::CoordType c_LeftMargin = 124.0;
     static constexpr gui::CoordType c_RightMargin = 32.0;
     static constexpr gui::CoordType c_TopMargin = 184.0;
     static constexpr gui::CoordType c_BottomMargin = 68.0;
@@ -132,6 +132,51 @@ private:
                 return "enhanced accuracy^2";
         }
         return "value";
+    }
+
+    [[nodiscard]] static td::String formatAxisLabel(
+        const double value,
+        const double tickStep
+    )
+    {
+        td::String label;
+        const double step = std::abs(tickStep);
+        if (!std::isfinite(value) || !std::isfinite(step) || step <= 0.0)
+        {
+            label.format("%.6g", value);
+            return label;
+        }
+
+        const double displayValue = std::abs(value) < step * 1e-9
+            ? 0.0
+            : value;
+        const double magnitude = std::max(std::abs(displayValue), step);
+        int significantDigits = 3;
+        if (step < magnitude)
+        {
+            significantDigits = static_cast<int>(
+                std::ceil(std::log10(magnitude / step))
+            ) + 2;
+        }
+        significantDigits = std::clamp(significantDigits, 3, 15);
+
+        const bool scientific = step < 1e-4
+            || std::abs(displayValue) >= 1e7
+            || (std::abs(displayValue) > 0.0
+                && std::abs(displayValue) < 1e-4);
+        if (scientific)
+        {
+            label.format("%.*e", significantDigits - 1, displayValue);
+        }
+        else
+        {
+            int decimalPlaces = step < 1.0
+                ? static_cast<int>(std::ceil(-std::log10(step))) + 1
+                : (step < 10.0 ? 1 : 0);
+            decimalPlaces = std::clamp(decimalPlaces, 0, 14);
+            label.format("%.*f", decimalPlaces, displayValue);
+        }
+        return label;
     }
 
     [[nodiscard]] gui::Rect plotBounds() const
@@ -481,6 +526,7 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
 
         constexpr int yDivisions = 6;
+        const double yTickStep = (_yMaximum - _yMinimum) / yDivisions;
         for (int division = 0; division <= yDivisions; ++division)
         {
             const double ratio =
@@ -496,11 +542,7 @@ private:
             );
 
             const double value = _yMaximum - ratio * (_yMaximum - _yMinimum);
-            td::String label;
-            if (_scaleMode == ScaleMode::Linear)
-                label.format("%.2e", value);
-            else
-                label.format("%.1f", value);
+            const td::String label = formatAxisLabel(value, yTickStep);
             drawText(
                 label,
                 gui::Rect(bounds.left + 5.0, y - 11.0, plot.left - 8.0, y + 11.0),

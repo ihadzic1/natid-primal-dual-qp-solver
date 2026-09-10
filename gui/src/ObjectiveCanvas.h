@@ -20,8 +20,8 @@ class ObjectiveCanvas final : public gui::Canvas
 private:
     static constexpr double c_KeyboardZoomFactor = 1.25;
     static constexpr double c_KeyboardPanFraction = 0.12;
-    static constexpr double c_MaximumZoom = 1'000'000.0;
-    static constexpr gui::CoordType c_LeftMargin = 78.0;
+    static constexpr double c_MaximumZoom = 1'000'000'000'000.0;
+    static constexpr gui::CoordType c_LeftMargin = 124.0;
     static constexpr gui::CoordType c_RightMargin = 32.0;
     static constexpr gui::CoordType c_TopMargin = 126.0;
     static constexpr gui::CoordType c_BottomMargin = 65.0;
@@ -33,9 +33,16 @@ private:
         double rhs = 0.0;
     };
 
+    struct ContourLevel
+    {
+        double value = 0.0;
+        bool solverLevel = false;
+    };
+
     std::vector<natid_qp::IterationStats> _history;
     std::vector<Constraint2D> _equalities;
     std::vector<Constraint2D> _inequalities;
+    std::vector<ContourLevel> _contourLevels;
     std::array<double, 4> _q{};
     std::array<double, 2> _c{};
     std::array<double, 2> _optimum{};
@@ -79,6 +86,51 @@ private:
             horizontal,
             vertical
         );
+    }
+
+    [[nodiscard]] static td::String formatAxisLabel(
+        const double value,
+        const double tickStep
+    )
+    {
+        td::String label;
+        const double step = std::abs(tickStep);
+        if (!std::isfinite(value) || !std::isfinite(step) || step <= 0.0)
+        {
+            label.format("%.6g", value);
+            return label;
+        }
+
+        const double displayValue = std::abs(value) < step * 1e-9
+            ? 0.0
+            : value;
+        const double magnitude = std::max(std::abs(displayValue), step);
+        int significantDigits = 3;
+        if (step < magnitude)
+        {
+            significantDigits = static_cast<int>(
+                std::ceil(std::log10(magnitude / step))
+            ) + 2;
+        }
+        significantDigits = std::clamp(significantDigits, 3, 15);
+
+        const bool scientific = step < 1e-4
+            || std::abs(displayValue) >= 1e7
+            || (std::abs(displayValue) > 0.0
+                && std::abs(displayValue) < 1e-4);
+        if (scientific)
+        {
+            label.format("%.*e", significantDigits - 1, displayValue);
+        }
+        else
+        {
+            int decimalPlaces = step < 1.0
+                ? static_cast<int>(std::ceil(-std::log10(step))) + 1
+                : (step < 10.0 ? 1 : 0);
+            decimalPlaces = std::clamp(decimalPlaces, 0, 14);
+            label.format("%.*f", decimalPlaces, displayValue);
+        }
+        return label;
     }
 
     [[nodiscard]] double objectiveValue(const double x, const double y) const
@@ -193,6 +245,95 @@ private:
         _xMaximum = centerX + halfSpan;
         _yMinimum = centerY - halfSpan;
         _yMaximum = centerY + halfSpan;
+    }
+
+    void updateContourLevels()
+    {
+        _contourLevels.clear();
+        if (_variables != 2)
+            return;
+
+        std::vector<double> solverLevels;
+        solverLevels.reserve(_history.size());
+        for (const natid_qp::IterationStats& stats : _history)
+        {
+            if (stats.x.size() < 2)
+                continue;
+            const double level = objectiveValue(stats.x[0], stats.x[1]);
+            if (std::isfinite(level))
+                solverLevels.push_back(level);
+        }
+
+        std::sort(solverLevels.begin(), solverLevels.end());
+        solverLevels.erase(
+            std::unique(
+                solverLevels.begin(),
+                solverLevels.end(),
+                [](const double first, const double second)
+                {
+                    return first == second;
+                }
+            ),
+            solverLevels.end()
+        );
+
+        constexpr int columns = 42;
+        constexpr int rows = 30;
+        constexpr int backgroundLevelCount = 12;
+        double minimum = std::numeric_limits<double>::infinity();
+        double maximum = -std::numeric_limits<double>::infinity();
+        for (int row = 0; row <= rows; ++row)
+        {
+            const double y = _fullYMinimum
+                + (_fullYMaximum - _fullYMinimum) * row / rows;
+            for (int column = 0; column <= columns; ++column)
+            {
+                const double x = _fullXMinimum
+                    + (_fullXMaximum - _fullXMinimum) * column / columns;
+                const double value = objectiveValue(x, y);
+                if (std::isfinite(value))
+                {
+                    minimum = std::min(minimum, value);
+                    maximum = std::max(maximum, value);
+                }
+            }
+        }
+
+        _contourLevels.reserve(solverLevels.size() + backgroundLevelCount);
+        for (const double level : solverLevels)
+            _contourLevels.push_back({level, true});
+
+        const double range = maximum - minimum;
+        if (std::isfinite(range)
+            && range > std::numeric_limits<double>::epsilon())
+        {
+            const double spacing = range / (backgroundLevelCount + 1);
+            const double minimumDistance = 0.35 * spacing;
+            for (int index = 1; index <= backgroundLevelCount; ++index)
+            {
+                const double candidate = minimum + index * spacing;
+                const bool tooCloseToSolverLevel = std::any_of(
+                    solverLevels.begin(),
+                    solverLevels.end(),
+                    [candidate, minimumDistance](const double solverLevel)
+                    {
+                        return std::abs(candidate - solverLevel)
+                            < minimumDistance;
+                    }
+                );
+                if (!tooCloseToSolverLevel)
+                    _contourLevels.push_back({candidate, false});
+            }
+        }
+
+        std::sort(
+            _contourLevels.begin(),
+            _contourLevels.end(),
+            [](const ContourLevel& first, const ContourLevel& second)
+            {
+                return first.value < second.value;
+            }
+        );
     }
 
     void updateObjectiveRange()
@@ -593,42 +734,29 @@ private:
         };
 
         for (const Constraint2D& inequality : _inequalities)
-            drawBoundary(inequality, td::ColorID::SeaGreen, td::LinePattern::Solid);
+        {
+            drawBoundary(
+                inequality,
+                td::ColorID::DarkOrange,
+                td::LinePattern::Dash
+            );
+        }
         for (const Constraint2D& equality : _equalities)
-            drawBoundary(equality, td::ColorID::DarkOrange, td::LinePattern::Dash);
+        {
+            drawBoundary(
+                equality,
+                td::ColorID::Crimson,
+                td::LinePattern::DashDot
+            );
+        }
     }
 
     void drawContours(const gui::Rect& plot) const
     {
         constexpr int columns = 42;
         constexpr int rows = 30;
-        constexpr int levelCount = 10;
-        double minimum = std::numeric_limits<double>::infinity();
-        double maximum = -std::numeric_limits<double>::infinity();
-
-        for (int row = 0; row <= rows; ++row)
-        {
-            const double y = _yMinimum
-                + (_yMaximum - _yMinimum) * row / rows;
-            for (int column = 0; column <= columns; ++column)
-            {
-                const double x = _xMinimum
-                    + (_xMaximum - _xMinimum) * column / columns;
-                const double value = objectiveValue(x, y);
-                if (std::isfinite(value))
-                {
-                    minimum = std::min(minimum, value);
-                    maximum = std::max(maximum, value);
-                }
-            }
-        }
-
-        const double range = maximum - minimum;
-        if (!std::isfinite(range)
-            || range <= std::numeric_limits<double>::epsilon())
-        {
+        if (_contourLevels.empty())
             return;
-        }
 
         const auto intersection = [](const double x0,
                                      const double y0,
@@ -639,7 +767,7 @@ private:
                                      const double level)
         {
             const double denominator = v1 - v0;
-            const double ratio = std::abs(denominator) > 1e-15
+            const double ratio = denominator != 0.0
                 ? std::clamp((level - v0) / denominator, 0.0, 1.0)
                 : 0.5;
             return std::array<double, 2>{
@@ -648,11 +776,9 @@ private:
             };
         };
 
-        for (int levelIndex = 1; levelIndex <= levelCount; ++levelIndex)
+        for (const ContourLevel& contour : _contourLevels)
         {
-            const double ratio =
-                static_cast<double>(levelIndex) / (levelCount + 1);
-            const double level = minimum + ratio * range;
+            const double level = contour.value;
             for (int row = 0; row < rows; ++row)
             {
                 const double y0 = _yMinimum
@@ -697,10 +823,12 @@ private:
                                 mapDataX(crossings[point][0], plot),
                                 mapDataY(crossings[point][1], plot)
                             ),
-                            td::ColorID::SlateGray,
-                            1.0f,
+                            contour.solverLevel
+                                ? td::ColorID::DodgerBlue
+                                : td::ColorID::SlateGray,
+                            contour.solverLevel ? 1.15f : 1.0f,
                             td::LinePattern::Solid,
-                            0.55f
+                            contour.solverLevel ? 0.55f : 0.38f
                         );
                     }
                 }
@@ -711,6 +839,8 @@ private:
     void drawAxesAndTicks(const gui::Rect& bounds, const gui::Rect& plot) const
     {
         constexpr int divisions = 5;
+        const double xTickStep = (_xMaximum - _xMinimum) / divisions;
+        const double yTickStep = (_yMaximum - _yMinimum) / divisions;
         for (int division = 0; division <= divisions; ++division)
         {
             const double ratio = static_cast<double>(division) / divisions;
@@ -733,23 +863,21 @@ private:
                 0.22f
             );
 
-            td::String xLabel;
-            xLabel.format(
-                "%.3g",
-                _xMinimum + ratio * (_xMaximum - _xMinimum)
+            const td::String xLabel = formatAxisLabel(
+                _xMinimum + ratio * (_xMaximum - _xMinimum),
+                xTickStep
             );
             drawText(
                 xLabel,
-                gui::Rect(x - 32.0, plot.bottom + 4.0, x + 32.0, bounds.bottom - 34.0),
+                gui::Rect(x - 68.0, plot.bottom + 4.0, x + 68.0, bounds.bottom - 34.0),
                 gui::Font::ID::SystemSmallest,
                 td::ColorID::SysText,
                 td::TextAlignment::Center
             );
 
-            td::String yLabel;
-            yLabel.format(
-                "%.3g",
-                _yMinimum + ratio * (_yMaximum - _yMinimum)
+            const td::String yLabel = formatAxisLabel(
+                _yMinimum + ratio * (_yMaximum - _yMinimum),
+                yTickStep
             );
             drawText(
                 yLabel,
@@ -887,42 +1015,105 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
         const gui::CoordType legendY = plot.top - 17.0;
-        gui::Shape::drawLine(
-            gui::Point(plot.left + 95.0, legendY),
-            gui::Point(plot.left + 123.0, legendY),
+        gui::CoordType legendX = plot.left + 10.0;
+        const auto drawLineLegend = [legendY, &legendX](
+            const char* label,
+            const td::ColorID color,
+            const td::LinePattern pattern,
+            const float width,
+            const gui::CoordType entryWidth
+        )
+        {
+            gui::Shape::drawLine(
+                gui::Point(legendX, legendY),
+                gui::Point(legendX + 24.0, legendY),
+                color,
+                width,
+                pattern
+            );
+            drawText(
+                td::String(label),
+                gui::Rect(
+                    legendX + 30.0,
+                    legendY - 10.0,
+                    legendX + entryWidth,
+                    legendY + 10.0
+                ),
+                gui::Font::ID::SystemSmallest,
+                td::ColorID::SysText
+            );
+            legendX += entryWidth;
+        };
+
+        drawLineLegend(
+            "iterate path",
             td::ColorID::DodgerBlue,
-            3.0f
+            td::LinePattern::Solid,
+            3.0f,
+            125.0
         );
-        drawText(
-            td::String("iterate path"),
-            gui::Rect(plot.left + 130.0, legendY - 10.0, plot.left + 225.0, legendY + 10.0),
-            gui::Font::ID::SystemSmallest,
-            td::ColorID::SysText
-        );
-        gui::Shape::drawLine(
-            gui::Point(plot.left + 245.0, legendY),
-            gui::Point(plot.left + 273.0, legendY),
-            td::ColorID::Green,
-            2.5f
-        );
-        drawText(
-            td::String("optimum"),
-            gui::Rect(plot.left + 280.0, legendY - 10.0, plot.left + 350.0, legendY + 10.0),
-            gui::Font::ID::SystemSmallest,
-            td::ColorID::SysText
-        );
+        if (_converged)
+        {
+            gui::Shape::drawLine(
+                gui::Point(legendX, legendY),
+                gui::Point(legendX + 24.0, legendY),
+                td::ColorID::Green,
+                2.5f
+            );
+            gui::Shape::drawLine(
+                gui::Point(legendX + 12.0, legendY - 6.0),
+                gui::Point(legendX + 12.0, legendY + 6.0),
+                td::ColorID::Green,
+                2.5f
+            );
+            drawText(
+                td::String("optimum"),
+                gui::Rect(
+                    legendX + 30.0,
+                    legendY - 10.0,
+                    legendX + 95.0,
+                    legendY + 10.0
+                ),
+                gui::Font::ID::SystemSmallest,
+                td::ColorID::SysText
+            );
+            legendX += 95.0;
+        }
         if (!_inequalities.empty())
         {
             gui::Shape::drawRect(
-                gui::Rect(plot.left + 370.0, legendY - 6.0, plot.left + 392.0, legendY + 6.0),
+                gui::Rect(legendX, legendY - 6.0, legendX + 22.0, legendY + 6.0),
                 0.25f,
                 td::ColorID::LightGreen
             );
             drawText(
                 td::String("feasible"),
-                gui::Rect(plot.left + 398.0, legendY - 10.0, plot.left + 468.0, legendY + 10.0),
+                gui::Rect(
+                    legendX + 28.0,
+                    legendY - 10.0,
+                    legendX + 92.0,
+                    legendY + 10.0
+                ),
                 gui::Font::ID::SystemSmallest,
                 td::ColorID::SysText
+            );
+            legendX += 95.0;
+            drawLineLegend(
+                "ineq constraint",
+                td::ColorID::DarkOrange,
+                td::LinePattern::Dash,
+                1.5f,
+                135.0
+            );
+        }
+        if (!_equalities.empty())
+        {
+            drawLineLegend(
+                "eq constraint",
+                td::ColorID::Crimson,
+                td::LinePattern::DashDot,
+                1.5f,
+                125.0
             );
         }
     }
@@ -966,6 +1157,8 @@ private:
 
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
         constexpr int divisions = 6;
+        const double objectiveTickStep =
+            (_objectiveMaximum - _objectiveMinimum) / divisions;
         for (int division = 0; division <= divisions; ++division)
         {
             const double ratio = static_cast<double>(division) / divisions;
@@ -978,11 +1171,10 @@ private:
                 td::LinePattern::Solid,
                 0.3f
             );
-            td::String label;
-            label.format(
-                "%.4g",
+            const td::String label = formatAxisLabel(
                 _objectiveMaximum
-                    - ratio * (_objectiveMaximum - _objectiveMinimum)
+                    - ratio * (_objectiveMaximum - _objectiveMinimum),
+                objectiveTickStep
             );
             drawText(
                 label,
@@ -1284,6 +1476,7 @@ public:
         _visiblePointCount = _hasData ? 1 : 0;
         _equalities.clear();
         _inequalities.clear();
+        _contourLevels.clear();
 
         if (_variables == 2)
         {
@@ -1319,6 +1512,7 @@ public:
             _fullXMaximum = _xMaximum;
             _fullYMinimum = _yMinimum;
             _fullYMaximum = _yMaximum;
+            updateContourLevels();
         }
 
         updateObjectiveRange();
@@ -1341,6 +1535,7 @@ public:
         _history.clear();
         _equalities.clear();
         _inequalities.clear();
+        _contourLevels.clear();
         _visiblePointCount = 0;
         _variables = 0;
         _hasData = false;
