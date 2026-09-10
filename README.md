@@ -169,6 +169,10 @@ of the regular contour spacing to a solver level, avoiding visual duplicates.
 The objective legend distinguishes the single green optimum marker from
 orange dashed inequality constraints and crimson dash-dot equality constraints;
 the translucent green area remains the feasible region.
+In the residual chart, vertical grid lines are drawn for every visible
+iteration whenever the available pixel spacing permits it. Grid density and
+iteration-label density are calculated independently, so labels can be thinned
+without making the corresponding iteration grid disappear.
 
 ## Matrix Market convention
 

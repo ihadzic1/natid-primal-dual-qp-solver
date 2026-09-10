@@ -563,45 +563,76 @@ private:
                 static_cast<std::size_t>(std::floor(_viewXMaximum + 1e-9)),
                 pointCount - 1
             );
-            const std::size_t availableTicks = lastTick >= firstTick
-                ? lastTick - firstTick + 1
-                : 0;
-            const std::size_t tickCount = std::min<std::size_t>(7, availableTicks);
-
-            const auto drawIterationTick =
-                [this, &plot, &bounds](const std::size_t index)
+            if (lastTick >= firstTick)
             {
-                const gui::CoordType x = mapX(index, plot);
-                gui::Shape::drawLine(
-                    gui::Point(x, plot.top),
-                    gui::Point(x, plot.bottom),
-                    td::ColorID::Gray,
-                    1.0f,
-                    td::LinePattern::Solid,
-                    0.25f
+                const std::size_t availableTicks = lastTick - firstTick + 1;
+                const double visibleSpan = std::max(
+                    1e-12,
+                    _viewXMaximum - _viewXMinimum
                 );
+                const double pixelsPerIteration =
+                    static_cast<double>(plot.width()) / visibleSpan;
+                const auto strideForSpacing =
+                    [availableTicks, pixelsPerIteration](const double minimumPixels)
+                {
+                    const double safePixelsPerIteration =
+                        std::max(1e-12, pixelsPerIteration);
+                    const std::size_t requestedStride =
+                        static_cast<std::size_t>(std::ceil(
+                            minimumPixels / safePixelsPerIteration
+                        ));
+                    return std::max<std::size_t>(
+                        1,
+                        std::min(availableTicks, requestedStride)
+                    );
+                };
 
-                td::String label;
-                label.format("%d", _history[index].iteration);
-                drawText(
-                    label,
-                    gui::Rect(x - 22.0, plot.bottom + 5.0, x + 22.0, bounds.bottom - 35.0),
-                    gui::Font::ID::SystemSmallest,
-                    td::ColorID::SysText,
-                    td::TextAlignment::Center
-                );
-            };
+                // Grid lines and text labels deliberately use independent
+                // spacing. This keeps a line at every iteration in normal
+                // views while preventing dense histories from turning the
+                // plot into a solid block or overlapping their labels.
+                const std::size_t gridStride = strideForSpacing(10.0);
+                const std::size_t labelStride = strideForSpacing(44.0);
 
-            std::size_t previousTick = pointCount;
-            for (std::size_t tick = 0; tick < tickCount; ++tick)
-            {
-                const std::size_t index = tickCount <= 1
-                    ? firstTick
-                    : firstTick + tick * (lastTick - firstTick) / (tickCount - 1);
-                if (index == previousTick)
-                    continue;
-                drawIterationTick(index);
-                previousTick = index;
+                for (std::size_t index = firstTick;;)
+                {
+                    const gui::CoordType x = mapX(index, plot);
+                    gui::Shape::drawLine(
+                        gui::Point(x, plot.top),
+                        gui::Point(x, plot.bottom),
+                        td::ColorID::Gray,
+                        1.0f,
+                        td::LinePattern::Solid,
+                        0.25f
+                    );
+
+                    if (lastTick - index < gridStride)
+                        break;
+                    index += gridStride;
+                }
+
+                for (std::size_t index = firstTick;;)
+                {
+                    const gui::CoordType x = mapX(index, plot);
+                    td::String label;
+                    label.format("%d", _history[index].iteration);
+                    drawText(
+                        label,
+                        gui::Rect(
+                            x - 22.0,
+                            plot.bottom + 5.0,
+                            x + 22.0,
+                            bounds.bottom - 35.0
+                        ),
+                        gui::Font::ID::SystemSmallest,
+                        td::ColorID::SysText,
+                        td::TextAlignment::Center
+                    );
+
+                    if (lastTick - index < labelStride)
+                        break;
+                    index += labelStride;
+                }
             }
         }
 
