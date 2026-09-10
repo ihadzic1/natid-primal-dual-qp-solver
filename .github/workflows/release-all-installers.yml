@@ -244,6 +244,21 @@ jobs:
 
       - name: Collect Linux package
         run: |
+          # SetupCollector writes DevRes displayName directly into Debian's
+          # Package field. Keep the human-readable name for Windows/macOS,
+          # but provide a Debian-safe Linux override (lowercase, no spaces).
+          python3 - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          devres = Path(os.environ["GITHUB_WORKSPACE"]) / "gui" / "res" / "DevRes.xml"
+          ET.register_namespace("lin", "linux")
+          tree = ET.parse(devres)
+          tree.getroot().set("{linux}displayName", "natid-qp-solver")
+          tree.write(devres, encoding="utf-8", xml_declaration=True)
+          PY
+
           sudo mkdir -p /media
           sudo ln -s "$HOME/natID.RAMDisk" /media/RAMDisk
           cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"

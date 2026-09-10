@@ -49,6 +49,13 @@ The GUI's `gui/res/DevRes.xml` must also contain non-empty product metadata,
 especially `displayName`. SetupCollector uses this information for the Windows
 installer and stops with `Product displayName cannot be empty` if it is absent.
 
+For Linux, natID SetupCollector also copies `displayName` directly into the
+Debian `Package` field. Debian package identifiers cannot contain uppercase
+letters or spaces. The workflow therefore adds a Linux-only
+`lin:displayName="natid-qp-solver"` override to its temporary checkout before
+running SetupCollector. The common human-readable product name remains
+unchanged in the repository and in the Windows/macOS packages.
+
 ## Build locally on Windows
 
 Requirements:
