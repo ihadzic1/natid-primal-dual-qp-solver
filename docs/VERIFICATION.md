@@ -1,6 +1,22 @@
 # Verification record
 
-Verification date: 2026-07-27
+Latest verification date: 2026-09-10
+
+## Latest Windows verification
+
+- CMake configured and built `natid_qp`, `natid_qp_tests`, and
+  `natid_qp_gui` as C++20 with MSVC 19.42 against the installed production
+  natID SDK.
+- The native targets linked successfully, including `natid_qp_dtwin`,
+  `natGUI`, `modSolver`, and `symbSolvers`.
+- The native `ctest` run passed all tests.
+- A separate portable-backend MSVC C++20 build also passed all tests.
+- The tests now additionally verify that every iteration stores a complete
+  primal `x`, that its stored objective is consistent with that `x`, and that
+  the final history point matches `Solution::x`.
+
+The checks below record the earlier solver-focused verification retained from
+the previous project version.
 
 ## Checks completed
 
@@ -41,13 +57,17 @@ Verification date: 2026-07-27
    - Matrix Market `x`, `y`, `s`, and `z` output;
    - built-in and directory-based problem loading.
 
-## Platform boundary
+7. dTwin integration checks:
+   - generated NLE contains all KKT variable groups and complementarity
+     equations;
+   - exact, close, partial, mismatch, and unavailable classifications are
+     covered by automated tests;
+   - the native adapter and GUI compile in syntax-only mode against the actual
+     `sc::IModel`, GUI, and matrix headers from the supplied natID SDK.
 
-The supplied SDK package contains Windows `.dll` and `.lib` files. The current
-verification runtime is Linux, so it cannot perform the final Windows link or
-execute the proprietary natID binary implementation. API compatibility was
-instead checked directly against the supplied production headers, while
-algorithm execution used the isolated test backend.
+## Platform notes
 
-The final Windows build should be run with the supplied SDK as described in
-`README.md`.
+The supplied SDK package contains Windows `.dll` and `.lib` files. The latest
+verification was performed on Windows with those production headers and
+libraries, while the portable backend remains available for isolated solver
+tests on machines without the proprietary runtime.

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "natid_qp/InteriorPointSolver.h"
+#include "natid_qp/DTwinReferenceSolver.h"
 #include "natid_qp/QPProblem.h"
 
 #include <gui/Canvas.h>
 #include <gui/DrawableString.h>
 #include <gui/Shape.h>
+#include <gui/Transformation.h>
 
 #include <algorithm>
 #include <cmath>
@@ -17,8 +19,24 @@
 
 class ConvergenceCanvas final : public gui::Canvas
 {
+public:
+    enum class ScaleMode
+    {
+        Linear = 0,
+        Log10,
+        AccuracyDigits,
+        EnhancedAccuracy
+    };
+
 private:
     static constexpr double c_LogFloor = -12.0;
+    static constexpr double c_KeyboardZoomFactor = 1.25;
+    static constexpr double c_KeyboardPanFraction = 0.12;
+    static constexpr double c_MaximumZoom = 1'000'000'000'000.0;
+    static constexpr gui::CoordType c_LeftMargin = 124.0;
+    static constexpr gui::CoordType c_RightMargin = 32.0;
+    static constexpr gui::CoordType c_TopMargin = 184.0;
+    static constexpr gui::CoordType c_BottomMargin = 68.0;
 
     std::vector<double> _primal;
     std::vector<double> _dual;
@@ -31,16 +49,43 @@ private:
     td::String _message;
     td::String _finalStatus;
     td::String _finalXPreview;
+    td::String _dtwinStatusText;
+    td::String _dtwinDifferenceText;
 
     std::size_t _visiblePointCount = 0;
     std::size_t _variables = 0;
     std::size_t _equalities = 0;
     std::size_t _inequalities = 0;
-    double _toleranceLog = -8.0;
+    double _tolerance = 1e-8;
     double _yMinimum = -12.0;
     double _yMaximum = 1.0;
+    double _fullYMinimum = -12.0;
+    double _fullYMaximum = 1.0;
+    double _viewXMinimum = 0.0;
+    double _viewXMaximum = 1.0;
+    double _zoomLevel = 1.0;
+    ScaleMode _scaleMode = ScaleMode::Log10;
     bool _converged = false;
     bool _hasData = false;
+    natid_qp::MatchLevel _matchLevel = natid_qp::MatchLevel::NotCompared;
+
+    [[nodiscard]] td::ColorID comparisonColor() const
+    {
+        switch (_matchLevel)
+        {
+            case natid_qp::MatchLevel::ExactMatch:
+                return td::ColorID::Green;
+            case natid_qp::MatchLevel::CloseMatch:
+                return td::ColorID::DodgerBlue;
+            case natid_qp::MatchLevel::PartialMatch:
+                return td::ColorID::DarkOrange;
+            case natid_qp::MatchLevel::Mismatch:
+                return td::ColorID::Crimson;
+            case natid_qp::MatchLevel::NotCompared:
+                return td::ColorID::Gray;
+        }
+        return td::ColorID::Gray;
+    }
 
     static double toLogValue(const double value)
     {
@@ -49,17 +94,114 @@ private:
         return std::max(c_LogFloor, std::log10(std::max(std::abs(value), 1e-12)));
     }
 
-    static gui::CoordType mapX(
-        const std::size_t index,
-        const std::size_t count,
-        const gui::Rect& plot
+    [[nodiscard]] double displayValue(const double value) const
+    {
+        if (!std::isfinite(value))
+            return _scaleMode == ScaleMode::Log10 ? c_LogFloor : 0.0;
+
+        if (_scaleMode == ScaleMode::Linear)
+            return std::abs(value);
+
+        const double logarithm = toLogValue(value);
+        if (_scaleMode == ScaleMode::Log10)
+            return logarithm;
+
+        const double accuracyDigits = -logarithm;
+        if (_scaleMode == ScaleMode::AccuracyDigits)
+            return accuracyDigits;
+
+        // Signed square preserves ordering on both sides of value=1 while
+        // strongly separating very small residuals near convergence.
+        return std::copysign(
+            accuracyDigits * accuracyDigits,
+            accuracyDigits
+        );
+    }
+
+    [[nodiscard]] const char* scaleAxisTitle() const
+    {
+        switch (_scaleMode)
+        {
+            case ScaleMode::Linear:
+                return "value";
+            case ScaleMode::Log10:
+                return "log10(value)";
+            case ScaleMode::AccuracyDigits:
+                return "accuracy (-log10)";
+            case ScaleMode::EnhancedAccuracy:
+                return "enhanced accuracy^2";
+        }
+        return "value";
+    }
+
+    [[nodiscard]] static td::String formatAxisLabel(
+        const double value,
+        const double tickStep
     )
     {
-        if (count <= 1)
+        td::String label;
+        const double step = std::abs(tickStep);
+        if (!std::isfinite(value) || !std::isfinite(step) || step <= 0.0)
+        {
+            label.format("%.6g", value);
+            return label;
+        }
+
+        const double displayValue = std::abs(value) < step * 1e-9
+            ? 0.0
+            : value;
+        const double magnitude = std::max(std::abs(displayValue), step);
+        int significantDigits = 3;
+        if (step < magnitude)
+        {
+            significantDigits = static_cast<int>(
+                std::ceil(std::log10(magnitude / step))
+            ) + 2;
+        }
+        significantDigits = std::clamp(significantDigits, 3, 15);
+
+        const bool scientific = step < 1e-4
+            || std::abs(displayValue) >= 1e7
+            || (std::abs(displayValue) > 0.0
+                && std::abs(displayValue) < 1e-4);
+        if (scientific)
+        {
+            label.format("%.*e", significantDigits - 1, displayValue);
+        }
+        else
+        {
+            int decimalPlaces = step < 1.0
+                ? static_cast<int>(std::ceil(-std::log10(step))) + 1
+                : (step < 10.0 ? 1 : 0);
+            decimalPlaces = std::clamp(decimalPlaces, 0, 14);
+            label.format("%.*f", decimalPlaces, displayValue);
+        }
+        return label;
+    }
+
+    [[nodiscard]] gui::Rect plotBounds() const
+    {
+        gui::Size size;
+        getSize(size);
+        return gui::Rect(
+            c_LeftMargin,
+            c_TopMargin,
+            size.width - c_RightMargin,
+            size.height - c_BottomMargin
+        );
+    }
+
+    [[nodiscard]] gui::CoordType mapX(
+        const std::size_t index,
+        const gui::Rect& plot
+    ) const
+    {
+        const double range = _viewXMaximum - _viewXMinimum;
+        if (range <= std::numeric_limits<double>::epsilon())
             return plot.left;
-        const double position =
-            static_cast<double>(index) / static_cast<double>(count - 1);
-        return plot.left + position * plot.width();
+        return plot.left
+            + (static_cast<double>(index) - _viewXMinimum)
+                / range * plot.width();
     }
 
     gui::CoordType mapY(const double value, const gui::Rect& plot) const
@@ -71,28 +213,201 @@ private:
         return plot.bottom - normalized * plot.height();
     }
 
-    void updateYRange()
+    void resetZoom()
     {
-        double minimum = _toleranceLog;
-        double maximum = _toleranceLog;
+        _zoomLevel = 1.0;
+        _viewXMinimum = 0.0;
+        _viewXMaximum = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        _yMinimum = _fullYMinimum;
+        _yMaximum = _fullYMaximum;
+    }
 
-        const auto inspect = [&minimum, &maximum](const std::vector<double>& values)
+    void zoomAt(const double requestedFactor, const gui::Point& requestedAnchor)
+    {
+        if (!_hasData || !std::isfinite(requestedFactor) || requestedFactor <= 0.0)
+            return;
+
+        const gui::Rect plot = plotBounds();
+        if (plot.width() <= 0.0 || plot.height() <= 0.0)
+            return;
+
+        const double fullXSpan = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        const double maximumZoom = std::max(
+            1.0,
+            std::min(c_MaximumZoom, fullXSpan)
+        );
+        const double newZoom = std::clamp(
+            _zoomLevel * requestedFactor,
+            1.0,
+            maximumZoom
+        );
+        const double effectiveFactor = newZoom / _zoomLevel;
+        if (std::abs(effectiveFactor - 1.0) <= 1e-12)
+            return;
+
+        if (newZoom <= 1.0 + 1e-12)
         {
-            for (const double value : values)
+            resetZoom();
+            reDraw();
+            return;
+        }
+
+        const gui::Point anchor = plot.contains(requestedAnchor)
+            ? requestedAnchor
+            : gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            );
+        const double xRatio = std::clamp(
+            (anchor.x - plot.left) / plot.width(),
+            0.0,
+            1.0
+        );
+        const double yRatio = std::clamp(
+            (anchor.y - plot.top) / plot.height(),
+            0.0,
+            1.0
+        );
+        const double anchorX = _viewXMinimum
+            + xRatio * (_viewXMaximum - _viewXMinimum);
+        const double anchorY = _yMaximum
+            - yRatio * (_yMaximum - _yMinimum);
+
+        _viewXMinimum = anchorX
+            - (anchorX - _viewXMinimum) / effectiveFactor;
+        _viewXMaximum = anchorX
+            + (_viewXMaximum - anchorX) / effectiveFactor;
+        _yMinimum = anchorY - (anchorY - _yMinimum) / effectiveFactor;
+        _yMaximum = anchorY + (_yMaximum - anchorY) / effectiveFactor;
+
+        const auto keepInside = [](double& minimum,
+                                   double& maximum,
+                                   const double fullMinimum,
+                                   const double fullMaximum)
+        {
+            if (minimum < fullMinimum)
             {
-                minimum = std::min(minimum, value);
-                maximum = std::max(maximum, value);
+                maximum += fullMinimum - minimum;
+                minimum = fullMinimum;
+            }
+            if (maximum > fullMaximum)
+            {
+                minimum -= maximum - fullMaximum;
+                maximum = fullMaximum;
             }
         };
+        keepInside(_viewXMinimum, _viewXMaximum, 0.0, fullXSpan);
+        keepInside(_yMinimum, _yMaximum, _fullYMinimum, _fullYMaximum);
+        _zoomLevel = newZoom;
+        reDraw();
+    }
 
-        inspect(_primal);
-        inspect(_dual);
-        inspect(_mu);
+    void zoomAtCenter(const double factor)
+    {
+        const gui::Rect plot = plotBounds();
+        zoomAt(
+            factor,
+            gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            )
+        );
+    }
 
-        _yMinimum = std::floor(minimum);
-        _yMaximum = std::ceil(maximum);
-        if (_yMaximum - _yMinimum < 2.0)
-            _yMaximum = _yMinimum + 2.0;
+    void panBy(const double horizontalFraction, const double verticalFraction)
+    {
+        if (!_hasData || _zoomLevel <= 1.0 + 1e-12)
+            return;
+
+        const double fullXSpan = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        const double xShift = horizontalFraction
+            * (_viewXMaximum - _viewXMinimum);
+        const double yShift = verticalFraction
+            * (_yMaximum - _yMinimum);
+        _viewXMinimum += xShift;
+        _viewXMaximum += xShift;
+        _yMinimum += yShift;
+        _yMaximum += yShift;
+
+        const auto keepInside = [](double& minimum,
+                                   double& maximum,
+                                   const double fullMinimum,
+                                   const double fullMaximum)
+        {
+            if (minimum < fullMinimum)
+            {
+                maximum += fullMinimum - minimum;
+                minimum = fullMinimum;
+            }
+            if (maximum > fullMaximum)
+            {
+                minimum -= maximum - fullMaximum;
+                maximum = fullMaximum;
+            }
+        };
+        keepInside(_viewXMinimum, _viewXMaximum, 0.0, fullXSpan);
+        keepInside(_yMinimum, _yMaximum, _fullYMinimum, _fullYMaximum);
+        reDraw();
+    }
+
+    void updateYRange()
+    {
+        if (_scaleMode == ScaleMode::Linear)
+        {
+            double maximum = std::abs(_tolerance);
+            const auto inspectMaximum = [&maximum](const std::vector<double>& values)
+            {
+                for (const double value : values)
+                {
+                    if (std::isfinite(value))
+                        maximum = std::max(maximum, std::abs(value));
+                }
+            };
+
+            inspectMaximum(_primal);
+            inspectMaximum(_dual);
+            inspectMaximum(_mu);
+            _yMinimum = 0.0;
+            _yMaximum = maximum > std::numeric_limits<double>::epsilon()
+                ? 1.05 * maximum
+                : 1.0;
+        }
+        else
+        {
+            double minimum = displayValue(_tolerance);
+            double maximum = displayValue(_tolerance);
+
+            const auto inspect = [this, &minimum, &maximum](
+                const std::vector<double>& values
+            )
+            {
+                for (const double value : values)
+                {
+                    const double displayed = displayValue(value);
+                    minimum = std::min(minimum, displayed);
+                    maximum = std::max(maximum, displayed);
+                }
+            };
+
+            inspect(_primal);
+            inspect(_dual);
+            inspect(_mu);
+
+            _yMinimum = std::floor(minimum);
+            _yMaximum = std::ceil(maximum);
+            if (_yMaximum - _yMinimum < 2.0)
+                _yMaximum = _yMinimum + 2.0;
+        }
+
+        _fullYMinimum = _yMinimum;
+        _fullYMaximum = _yMaximum;
+        resetZoom();
     }
 
     static void drawText(
@@ -145,24 +460,33 @@ private:
         if (count == 0)
             return;
 
-        for (std::size_t index = 1; index < count; ++index)
+        const std::size_t firstIndex = std::min(
+            static_cast<std::size_t>(std::floor(_viewXMinimum)),
+            count - 1
+        );
+        const std::size_t lastIndex = std::min(
+            static_cast<std::size_t>(std::ceil(_viewXMaximum)),
+            count - 1
+        );
+
+        for (std::size_t index = firstIndex + 1; index <= lastIndex; ++index)
         {
             const gui::Point previous(
-                mapX(index - 1, values.size(), plot),
-                mapY(values[index - 1], plot)
+                mapX(index - 1, plot),
+                mapY(displayValue(values[index - 1]), plot)
             );
             const gui::Point current(
-                mapX(index, values.size(), plot),
-                mapY(values[index], plot)
+                mapX(index, plot),
+                mapY(displayValue(values[index]), plot)
             );
             gui::Shape::drawLine(previous, current, color, 2.5f);
         }
 
-        for (std::size_t index = 0; index < count; ++index)
+        for (std::size_t index = firstIndex; index <= lastIndex; ++index)
         {
             const gui::Point point(
-                mapX(index, values.size(), plot),
-                mapY(values[index], plot)
+                mapX(index, plot),
+                mapY(displayValue(values[index]), plot)
             );
             const gui::Rect marker(
                 point.x - 2.5,
@@ -176,16 +500,11 @@ private:
 
     void drawChart(const gui::Rect& bounds)
     {
-        constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 24.0;
-        constexpr gui::CoordType topMargin = 142.0;
-        constexpr gui::CoordType bottomMargin = 58.0;
-
         const gui::Rect plot(
-            bounds.left + leftMargin,
-            bounds.top + topMargin,
-            bounds.right - rightMargin,
-            bounds.bottom - bottomMargin
+            bounds.left + c_LeftMargin,
+            bounds.top + c_TopMargin,
+            bounds.right - c_RightMargin,
+            bounds.bottom - c_BottomMargin
         );
 
         if (plot.width() < 180.0 || plot.height() < 140.0)
@@ -207,6 +526,7 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
 
         constexpr int yDivisions = 6;
+        const double yTickStep = (_yMaximum - _yMinimum) / yDivisions;
         for (int division = 0; division <= yDivisions; ++division)
         {
             const double ratio =
@@ -222,8 +542,7 @@ private:
             );
 
             const double value = _yMaximum - ratio * (_yMaximum - _yMinimum);
-            td::String label;
-            label.format("%.1f", value);
+            const td::String label = formatAxisLabel(value, yTickStep);
             drawText(
                 label,
                 gui::Rect(bounds.left + 5.0, y - 11.0, plot.left - 8.0, y + 11.0),
@@ -236,46 +555,92 @@ private:
         const std::size_t pointCount = _primal.size();
         if (pointCount > 0)
         {
-            const std::size_t tickStep =
-                pointCount <= 7 ? 1 : std::max<std::size_t>(1, (pointCount - 1) / 6);
-
-            const auto drawIterationTick =
-                [this, &plot, &bounds, pointCount](const std::size_t index)
+            const std::size_t firstTick = std::min(
+                static_cast<std::size_t>(std::ceil(_viewXMinimum - 1e-9)),
+                pointCount - 1
+            );
+            const std::size_t lastTick = std::min(
+                static_cast<std::size_t>(std::floor(_viewXMaximum + 1e-9)),
+                pointCount - 1
+            );
+            if (lastTick >= firstTick)
             {
-                const gui::CoordType x = mapX(index, pointCount, plot);
-                gui::Shape::drawLine(
-                    gui::Point(x, plot.top),
-                    gui::Point(x, plot.bottom),
-                    td::ColorID::Gray,
-                    1.0f,
-                    td::LinePattern::Solid,
-                    0.25f
+                const std::size_t availableTicks = lastTick - firstTick + 1;
+                const double visibleSpan = std::max(
+                    1e-12,
+                    _viewXMaximum - _viewXMinimum
                 );
+                const double pixelsPerIteration =
+                    static_cast<double>(plot.width()) / visibleSpan;
+                const auto strideForSpacing =
+                    [availableTicks, pixelsPerIteration](const double minimumPixels)
+                {
+                    const double safePixelsPerIteration =
+                        std::max(1e-12, pixelsPerIteration);
+                    const std::size_t requestedStride =
+                        static_cast<std::size_t>(std::ceil(
+                            minimumPixels / safePixelsPerIteration
+                        ));
+                    return std::max<std::size_t>(
+                        1,
+                        std::min(availableTicks, requestedStride)
+                    );
+                };
 
-                td::String label;
-                label.format("%llu", static_cast<unsigned long long>(index));
-                drawText(
-                    label,
-                    gui::Rect(x - 22.0, plot.bottom + 5.0, x + 22.0, bounds.bottom - 25.0),
-                    gui::Font::ID::SystemSmallest,
-                    td::ColorID::SysText,
-                    td::TextAlignment::Center
-                );
-            };
+                // Grid lines and text labels deliberately use independent
+                // spacing. This keeps a line at every iteration in normal
+                // views while preventing dense histories from turning the
+                // plot into a solid block or overlapping their labels.
+                const std::size_t gridStride = strideForSpacing(10.0);
+                const std::size_t labelStride = strideForSpacing(44.0);
 
-            std::size_t lastTick = 0;
-            for (std::size_t index = 0; index < pointCount; index += tickStep)
-            {
-                drawIterationTick(index);
-                lastTick = index;
+                for (std::size_t index = firstTick;;)
+                {
+                    const gui::CoordType x = mapX(index, plot);
+                    gui::Shape::drawLine(
+                        gui::Point(x, plot.top),
+                        gui::Point(x, plot.bottom),
+                        td::ColorID::Gray,
+                        1.0f,
+                        td::LinePattern::Solid,
+                        0.25f
+                    );
+
+                    if (lastTick - index < gridStride)
+                        break;
+                    index += gridStride;
+                }
+
+                for (std::size_t index = firstTick;;)
+                {
+                    const gui::CoordType x = mapX(index, plot);
+                    td::String label;
+                    label.format("%d", _history[index].iteration);
+                    drawText(
+                        label,
+                        gui::Rect(
+                            x - 22.0,
+                            plot.bottom + 5.0,
+                            x + 22.0,
+                            bounds.bottom - 35.0
+                        ),
+                        gui::Font::ID::SystemSmallest,
+                        td::ColorID::SysText,
+                        td::TextAlignment::Center
+                    );
+
+                    if (lastTick - index < labelStride)
+                        break;
+                    index += labelStride;
+                }
             }
-            if (lastTick != pointCount - 1)
-                drawIterationTick(pointCount - 1);
         }
 
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
-        const gui::CoordType toleranceY = mapY(_toleranceLog, plot);
+        gui::Transformation::saveContext();
+        gui::Transformation::setClip(plot);
+        const gui::CoordType toleranceY = mapY(displayValue(_tolerance), plot);
         gui::Shape::drawLine(
             gui::Point(plot.left, toleranceY),
             gui::Point(plot.right, toleranceY),
@@ -302,17 +667,19 @@ private:
             td::ColorID::Green,
             _visiblePointCount
         );
+        gui::Transformation::restoreContext();
+        gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
         const td::String xAxis("iteration");
         drawText(
             xAxis,
-            gui::Rect(plot.left, bounds.bottom - 27.0, plot.right, bounds.bottom - 3.0),
+            gui::Rect(plot.left, bounds.bottom - 34.0, plot.right, bounds.bottom - 10.0),
             gui::Font::ID::SystemSmaller,
             td::ColorID::SysText,
             td::TextAlignment::Center
         );
 
-        const td::String yAxis("log10(value)");
+        const td::String yAxis(scaleAxisTitle());
         drawText(
             yAxis,
             gui::Rect(bounds.left + 6.0, plot.top - 28.0, plot.left + 110.0, plot.top - 4.0),
@@ -377,6 +744,105 @@ private:
     }
 
 protected:
+    void onPrimaryButtonPressed(const gui::InputDevice&) override
+    {
+        setFocus(false);
+    }
+
+    bool onZoom(const gui::InputDevice& inputDevice) override
+    {
+        // getModelPoint() is local to this canvas. getFramePoint() is relative
+        // to the containing frame and makes the cursor anchor miss the plot.
+        zoomAt(inputDevice.getScale(), inputDevice.getModelPoint());
+        return true;
+    }
+
+    bool onScroll(const gui::InputDevice& inputDevice) override
+    {
+        // Ctrl/Cmd + wheel is delivered as a zoom gesture. Do not also pan if
+        // a platform forwards the same input as a scroll event.
+        if (inputDevice.isCmdOnMacOrCtrlOnOtherPressed())
+            return false;
+
+        const gui::Point& delta = inputDevice.getScrollDelta();
+        const double wheelDelta = std::abs(delta.y) > 1e-12
+            ? delta.y
+            : delta.x;
+        if (std::abs(wheelDelta) <= 1e-12)
+            return false;
+
+        const double step = wheelDelta > 0.0
+            ? c_KeyboardPanFraction
+            : -c_KeyboardPanFraction;
+        if (inputDevice.getKey().isShiftPressed())
+            panBy(-step, 0.0); // wheel up/down behaves like A/D
+        else
+            panBy(0.0, step); // wheel up/down behaves like W/S
+        return true;
+    }
+
+    bool onKeyPressed(const gui::Key& key) override
+    {
+        if (key.isCmdOnMacOrCtrlOnOtherPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == '+' || character == '='
+                || virtualKey == gui::Key::Virtual::NumPlus)
+            {
+                zoomAtCenter(c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '-' || character == '_'
+                || virtualKey == gui::Key::Virtual::NumMinus)
+            {
+                zoomAtCenter(1.0 / c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '0' || virtualKey == gui::Key::Virtual::Num0)
+            {
+                resetZoom();
+                reDraw();
+                return true;
+            }
+        }
+
+        if (!key.isAltCtrlOrCmdPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == 'a' || character == 'A'
+                || virtualKey == gui::Key::Virtual::Left
+                || virtualKey == gui::Key::Virtual::NumLeft)
+            {
+                panBy(-c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'd' || character == 'D'
+                || virtualKey == gui::Key::Virtual::Right
+                || virtualKey == gui::Key::Virtual::NumRight)
+            {
+                panBy(c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'w' || character == 'W'
+                || virtualKey == gui::Key::Virtual::Up
+                || virtualKey == gui::Key::Virtual::NumUp)
+            {
+                panBy(0.0, c_KeyboardPanFraction);
+                return true;
+            }
+            if (character == 's' || character == 'S'
+                || virtualKey == gui::Key::Virtual::Down
+                || virtualKey == gui::Key::Virtual::NumDown)
+            {
+                panBy(0.0, -c_KeyboardPanFraction);
+                return true;
+            }
+        }
+        return gui::Canvas::onKeyPressed(key);
+    }
+
     void onDraw(const gui::Rect&) override
     {
         gui::Size size;
@@ -384,10 +850,10 @@ protected:
         const gui::Rect bounds(0.0, 0.0, size.width, size.height);
 
         gui::Shape::drawRect(bounds, td::ColorID::SysCtrlBack);
-        const gui::Rect header(bounds.left, bounds.top, bounds.right, bounds.top + 116.0);
+        const gui::Rect header(bounds.left, bounds.top, bounds.right, bounds.top + 158.0);
         gui::Shape::drawRect(header, td::ColorID::SysBackAlt2);
 
-        const td::String title("NatIDQP convergence dashboard");
+        const td::String title("NatIDQP residuals");
         drawText(
             title,
             gui::Rect(22.0, 10.0, bounds.right - 22.0, 42.0),
@@ -421,6 +887,23 @@ protected:
             _converged ? td::ColorID::SysText : td::ColorID::Crimson
         );
 
+        gui::Shape::drawRect(
+            gui::Rect(23.0, 121.0, 31.0, 129.0),
+            comparisonColor()
+        );
+        drawText(
+            _dtwinStatusText,
+            gui::Rect(39.0, 112.0, bounds.right - 20.0, 139.0),
+            gui::Font::ID::SystemSmaller,
+            comparisonColor()
+        );
+        drawText(
+            _dtwinDifferenceText,
+            gui::Rect(22.0, 135.0, bounds.right - 20.0, 157.0),
+            gui::Font::ID::SystemSmallest,
+            td::ColorID::SysText
+        );
+
         if (_hasData)
         {
             drawChart(bounds);
@@ -430,7 +913,7 @@ protected:
             const td::String noData("No solver history is available.");
             drawText(
                 noData,
-                gui::Rect(20.0, 135.0, bounds.right - 20.0, bounds.bottom - 20.0),
+                gui::Rect(20.0, 170.0, bounds.right - 20.0, bounds.bottom - 20.0),
                 gui::Font::ID::SystemNormal,
                 td::ColorID::SysText,
                 td::TextAlignment::Center,
@@ -441,16 +924,32 @@ protected:
 
 public:
     ConvergenceCanvas()
+    : gui::Canvas({
+        gui::InputDevice::Event::PrimaryClicks,
+        gui::InputDevice::Event::Zoom,
+        gui::InputDevice::Event::Keyboard
+    })
     {
         enableResizeEvent(true);
+        registerForScrollEvents();
+        setFocusable(true);
+        setClipsToBounds();
+        setToolTip(
+            "Zoom: Ctrl+wheel or Ctrl+/Ctrl-. Pan: wheel, Shift+wheel, "
+            "arrows, or W/A/S/D. Ctrl+0 resets the view."
+        );
         _summary = "Solver has not been run.";
         _details = "Choose a demo problem or a QP folder.";
         _message = "";
+        _dtwinStatusText = "dTwin: not compared";
+        _dtwinDifferenceText = "";
     }
 
     void setSolution(
         const natid_qp::QPProblem& problem,
         const natid_qp::Solution& solution,
+        const natid_qp::DTwinReferenceResult& dtwinResult,
+        const natid_qp::SolutionComparison& comparison,
         const char* problemName,
         const double tolerance
     )
@@ -466,16 +965,16 @@ public:
 
         for (const natid_qp::IterationStats& stats : solution.history)
         {
-            _primal.push_back(toLogValue(stats.primalResidual));
-            _dual.push_back(toLogValue(stats.dualResidual));
-            _mu.push_back(toLogValue(stats.mu));
+            _primal.push_back(std::abs(stats.primalResidual));
+            _dual.push_back(std::abs(stats.dualResidual));
+            _mu.push_back(std::abs(stats.mu));
         }
 
         _problemName = problemName;
         _variables = problem.variables();
         _equalities = problem.equalities();
         _inequalities = problem.inequalities();
-        _toleranceLog = toLogValue(tolerance);
+        _tolerance = std::abs(tolerance);
         _converged = solution.converged();
         _hasData = !_primal.empty();
         _visiblePointCount = _hasData ? 1 : 0;
@@ -497,10 +996,70 @@ public:
 
         _finalStatus = natid_qp::toString(solution.status);
         _finalXPreview = xPreview.str().c_str();
+        _matchLevel = comparison.level;
+
+        std::ostringstream dtwinStatus;
+        dtwinStatus << "dTwin: " << natid_qp::toString(comparison.level);
+        if (dtwinResult.solved())
+        {
+            dtwinStatus << " | objective: " << std::setprecision(12)
+                        << dtwinResult.objective
+                        << " | KKT: " << std::scientific
+                        << std::setprecision(3) << dtwinResult.kktResidual
+                        << " | start: "
+                        << (dtwinResult.usedWarmStart ? "NatIDQP warm" : "neutral");
+        }
+        else if (!dtwinResult.message.empty())
+        {
+            dtwinStatus << " | " << dtwinResult.message;
+        }
+        _dtwinStatusText = dtwinStatus.str().c_str();
+
+        std::ostringstream dtwinDifference;
+        if (dtwinResult.solved())
+        {
+            dtwinDifference << std::scientific << std::setprecision(3)
+                            << "max|dx|=" << comparison.maxAbsoluteXDifference
+                            << " | rel x=" << comparison.relativeXDifference
+                            << " | |dObj|="
+                            << comparison.absoluteObjectiveDifference
+                            << " | x(dTwin)=[";
+            const std::size_t previewCount =
+                std::min<std::size_t>(dtwinResult.x.size(), 4);
+            for (std::size_t index = 0; index < previewCount; ++index)
+            {
+                if (index > 0)
+                    dtwinDifference << ", ";
+                dtwinDifference << dtwinResult.x[index];
+            }
+            if (dtwinResult.x.size() > previewCount)
+                dtwinDifference << ", ...";
+            dtwinDifference << "] | " << comparison.message;
+        }
+        else
+        {
+            dtwinDifference << comparison.message;
+        }
+        _dtwinDifferenceText = dtwinDifference.str().c_str();
 
         updateYRange();
         updatePlaybackText();
         reDraw();
+    }
+
+    void setScaleMode(const ScaleMode mode)
+    {
+        if (_scaleMode == mode)
+            return;
+
+        _scaleMode = mode;
+        updateYRange();
+        reDraw();
+    }
+
+    [[nodiscard]] ScaleMode getScaleMode() const
+    {
+        return _scaleMode;
     }
 
     [[nodiscard]] bool hasPlaybackData() const
@@ -511,6 +1070,15 @@ public:
     [[nodiscard]] bool isPlaybackComplete() const
     {
         return _history.empty() || _visiblePointCount >= _history.size();
+    }
+
+    void setPlaybackIndex(const std::size_t historyIndex)
+    {
+        _visiblePointCount = _history.empty()
+            ? 0
+            : std::min(historyIndex + 1, _history.size());
+        updatePlaybackText();
+        reDraw();
     }
 
     bool advancePlayback()
@@ -558,6 +1126,12 @@ public:
         _summary = "Solver error";
         _details = "The selected QP input could not be loaded or solved.";
         _message = message;
+        _matchLevel = natid_qp::MatchLevel::NotCompared;
+        _dtwinStatusText = "dTwin: not compared";
+        _dtwinDifferenceText = "Primary solver error.";
+        _fullYMinimum = -12.0;
+        _fullYMaximum = 1.0;
+        resetZoom();
         reDraw();
     }
 };

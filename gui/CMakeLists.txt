@@ -3,10 +3,10 @@ if(NATID_QP_PORTABLE_TEST_BACKEND)
     return()
 endif()
 
-if(NOT TARGET natid_qp_core)
+if(NOT TARGET natid_qp_core OR NOT TARGET natid_qp_dtwin)
     message(FATAL_ERROR
         "natid_qp_gui must be added from the NatIDQP root project, "
-        "after the natid_qp_core target is created."
+        "after the natid_qp_core and natid_qp_dtwin targets are created."
     )
 endif()
 
@@ -21,6 +21,7 @@ set(NATID_QP_GUI_HEADERS
     src/ConvergenceCanvas.h
     src/DashboardView.h
     src/MainWindow.h
+    src/ObjectiveCanvas.h
 )
 
 set(NATID_QP_GUI_PLIST "${CMAKE_CURRENT_LIST_DIR}/src/Info.plist")
@@ -35,8 +36,16 @@ target_link_libraries(
     natid_qp_gui
     PRIVATE
         natid_qp_core
+        natid_qp_dtwin
         debug ${NATGUI_LIB_DEBUG}
         optimized ${NATGUI_LIB_RELEASE}
+)
+
+# Used by the problem quick-select in development builds. Deployed builds also
+# search the natID application resource directory populated by the installer.
+target_compile_definitions(
+    natid_qp_gui
+    PRIVATE NATID_QP_DATA_DIR="${CMAKE_CURRENT_LIST_DIR}/../data"
 )
 
 source_group("src" FILES ${NATID_QP_GUI_SOURCES})

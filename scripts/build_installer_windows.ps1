@@ -71,6 +71,8 @@ try {
     New-Item -ItemType Directory -Force -Path $collectorConfigs | Out-Null
     Copy-Item "$NatIdSdkRoot\DevEnv\SetupCollectors\*" $collectorConfigs -Recurse -Force
     Copy-Item "$projectRoot\packaging\NatIDQP.xml" "$collectorConfigs\NatIDQP.xml" -Force
+    Copy-Item "$projectRoot\packaging\modSolver.xml" `
+        "$collectorConfigs\Packages\modSolver.xml" -Force
 
     if (Test-Path $gtkPackageFile) {
         Copy-Item $gtkPackageFile $gtkBackupFile -Force

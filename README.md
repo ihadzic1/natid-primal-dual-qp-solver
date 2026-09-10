@@ -34,10 +34,16 @@ where \(Q\) is symmetric positive semidefinite. Inequalities are converted to
   - `sparse::Pivoting::AlterMatrixIfIndefinite`
 - One KKT factorization and two right-hand-side solves per IPM iteration.
 - Matrix Market input for coordinate and array formats.
-- Per-iteration primal residual, dual residual, duality gap, barrier value,
-  KKT nonzero count, and timing statistics.
+- Per-iteration primal iterate \(x^{(k)}\), objective value, primal residual,
+  dual residual, duality gap, barrier value, KKT nonzero count, and timing
+  statistics.
 - CSV convergence history, text solution reports, and Matrix Market solution
   export.
+- Native GUI with synchronized **Objective Function** and **Residuals** tabs,
+  shared playback controls, adjustable playback speed, and residual Y-axis
+  modes. Two-variable problems use an objective contour plot with the iterate
+  path, feasible-set overlay, and optimum marker; larger problems use
+  objective value versus iteration.
 - Two checked example problems and automated tests.
 
 The implementation does not use Eigen or another production linear algebra
@@ -50,6 +56,7 @@ NatIDQP/
   CMakeLists.txt
   include/natid_qp/        Public project headers
   src/                     Solver, Matrix Market I/O, and CLI
+  gui/                     Native synchronized objective/residual dashboard
   data/                    Small verified QP examples
   docs/                    Algorithm and implementation notes
   scripts/                 Build, benchmark generation, and plotting helpers
@@ -132,6 +139,53 @@ be omitted. `Q.mtx`, `c.mtx`, `G.mtx`, and `h.mtx` are required for an
 inequality-constrained problem.
 
 Use `natid_qp.exe --help` for all solver and output options.
+
+## Native GUI
+
+Run `natid_qp_gui` to open the dashboard. **Choose QP Folder**, the tolerance
+input, **Run Again**, playback buttons, and the animation-speed slider apply to
+the loaded solver history. The **Objective Function** and **Residuals** tabs
+share one current iteration, so switching tabs never restarts or rewinds the
+animation. **Play Again** rewinds the existing history to iteration zero and
+does not run the solver again. The **Y-axis mode** selector affects the
+residual chart only.
+
+The **QP problem** selector replaces the two separate demo buttons. It contains
+the built-in inequality and equality demos followed by every valid problem
+folder found under `data`, in natural numeric order. Selecting an entry loads
+and solves it immediately. **Choose QP Folder** remains available for external
+problems and adds the chosen folder to the selector as a custom entry. Only
+folders containing `Q.mtx`, `c.mtx`, `G.mtx`, and `h.mtx` are listed; `A.mtx`
+and `b.mtx` must either both exist or both be absent. The installer packages
+the `data` directory so the same quick-select entries remain available after
+deployment. Data-folder discovery checks the configured source directory and
+the parent hierarchy of the source, resource, executable, and current-working
+paths, so an existing natID/Visual Studio build does not depend on a particular
+working directory or a freshly generated CMake compile definition.
+
+Both plots support interactive navigation. Place the pointer over a plot and
+use **Ctrl+mouse wheel** to zoom around the data point below the pointer. A
+plain mouse wheel pans vertically like **W/S**, while **Shift+mouse wheel** pans
+horizontally like **A/D**. Click a plot to give it keyboard focus, then use
+**Ctrl++** or **Ctrl+-** to zoom around its center and the arrow keys or
+**W/A/S/D** to pan. **Ctrl+0** restores the full data range. Zooming, panning,
+and switching tabs do not change the current animation iteration; loading or
+running a problem again resets the viewport. Deep zoom is supported up to
+`1e12`, and axis labels automatically add decimal precision or switch to
+scientific notation as the visible range becomes smaller. In the two-variable
+objective plot, contour levels are fixed for the loaded solution (including
+one unique objective level for every recorded solver point), so zooming does
+not replace an iteration's iso-line with a different objective level. Fainter,
+evenly spaced background contours fill otherwise empty objective ranges, but
+a background level is omitted whenever its objective value is closer than 35%
+of the regular contour spacing to a solver level, avoiding visual duplicates.
+The objective legend distinguishes the single green optimum marker from
+orange dashed inequality constraints and crimson dash-dot equality constraints;
+the translucent green area remains the feasible region.
+In the residual chart, vertical grid lines are drawn for every visible
+iteration whenever the available pixel spacing permits it. Grid density and
+iteration-label density are calculated independently, so labels can be thinned
+without making the corresponding iteration grid disappear.
 
 ## Matrix Market convention
 

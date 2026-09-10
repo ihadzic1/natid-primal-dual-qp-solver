@@ -181,6 +181,10 @@ IterationStats makeStats(
     IterationStats stats;
     stats.iteration = iteration;
     stats.objective = objectiveValue(problem, x);
+    stats.x.reserve(problem.variables());
+    const auto xValues = x.getFirstColumnManipulator();
+    for (unsigned int row = 0; row < problem.variables(); ++row)
+        stats.x.push_back(xValues(row));
     stats.primalResidual = std::max(
         vectorInfinityNorm(residuals.equality),
         vectorInfinityNorm(residuals.inequality)

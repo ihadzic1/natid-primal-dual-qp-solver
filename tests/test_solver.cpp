@@ -1,3 +1,4 @@
+#include "natid_qp/DTwinReferenceSolver.h"
 #include "natid_qp/InteriorPointSolver.h"
 #include "natid_qp/MatrixMarket.h"
 #include "natid_qp/QPProblem.h"
@@ -7,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -20,6 +22,52 @@ void require(const bool condition, const std::string& message)
 double vectorValue(const dense::DblMatrix& vector, const unsigned int row)
 {
     return vector.getFirstColumnManipulator()(row);
+}
+
+double objectiveAt(
+    const natid_qp::QPProblem& problem,
+    const std::vector<double>& x
+)
+{
+    require(x.size() == problem.variables(), "Iteration x has a wrong size.");
+    const auto q = problem.Q.getManipulator();
+    const auto c = problem.c.getFirstColumnManipulator();
+    double value = 0.0;
+    for (unsigned int row = 0; row < problem.variables(); ++row)
+    {
+        value += c(row) * x[row];
+        for (unsigned int column = 0; column < problem.variables(); ++column)
+            value += 0.5 * x[row] * q(row, column) * x[column];
+    }
+    return value;
+}
+
+void requirePrimalHistory(
+    const natid_qp::QPProblem& problem,
+    const natid_qp::Solution& solution
+)
+{
+    require(!solution.history.empty(), "Solver returned no iteration history.");
+    for (const natid_qp::IterationStats& stats : solution.history)
+    {
+        require(
+            stats.x.size() == problem.variables(),
+            "Iteration history did not preserve the complete primal iterate."
+        );
+        require(
+            std::abs(objectiveAt(problem, stats.x) - stats.objective) < 1e-10,
+            "Stored iteration objective does not match stored x."
+        );
+    }
+
+    const natid_qp::IterationStats& finalStats = solution.history.back();
+    for (unsigned int row = 0; row < problem.variables(); ++row)
+    {
+        require(
+            std::abs(finalStats.x[row] - vectorValue(solution.x, row)) < 1e-12,
+            "Final iteration x does not match Solution::x."
+        );
+    }
 }
 
 natid_qp::SolverOptions testOptions()
@@ -40,6 +88,7 @@ void testInequalityDemo()
         natid_qp::InteriorPointSolver(testOptions()).solve(problem);
 
     require(solution.converged(), "Inequality demo did not converge: " + solution.message);
+    requirePrimalHistory(problem, solution);
     require(
         std::abs(vectorValue(solution.x, 0) - 0.75) < 2e-6,
         "Wrong x1 for inequality demo."
@@ -69,6 +118,7 @@ void testEqualityDemo()
         natid_qp::InteriorPointSolver(testOptions()).solve(problem);
 
     require(solution.converged(), "Equality demo did not converge: " + solution.message);
+    requirePrimalHistory(problem, solution);
     require(
         std::abs(vectorValue(solution.x, 0) - 0.25) < 2e-6,
         "Wrong x1 for equality demo."
@@ -157,6 +207,118 @@ void testValidation()
     );
 }
 
+natid_qp::DTwinReferenceResult makeReferenceResult(
+    const natid_qp::QPProblem& problem,
+    const natid_qp::Solution& solution
+)
+{
+    natid_qp::DTwinReferenceResult result;
+    result.status = natid_qp::DTwinStatus::Solved;
+
+    const auto copyVector = [](const dense::DblMatrix& source)
+    {
+        std::vector<double> output(source.getNoOfRows(), 0.0);
+        if (source.getNoOfRows() == 0)
+            return output;
+        const auto values = source.getFirstColumnManipulator();
+        for (unsigned int row = 0; row < source.getNoOfRows(); ++row)
+            output[row] = values(row);
+        return output;
+    };
+
+    result.x = copyVector(solution.x);
+    result.equalityDual = copyVector(solution.equalityDual);
+    result.slack = copyVector(solution.slack);
+    result.inequalityDual = copyVector(solution.inequalityDual);
+    natid_qp::evaluateDTwinReference(problem, result);
+    return result;
+}
+
+void testDTwinModelGeneration()
+{
+    const natid_qp::QPProblem problem = natid_qp::makeEqualityDemoProblem();
+    natid_qp::DTwinReferenceOptions options;
+    options.tolerance = 1e-9;
+    options.maxIterations = 123;
+
+    const std::string model = natid_qp::buildDTwinKktModel(
+        problem,
+        nullptr,
+        options
+    );
+    require(
+        model.find("NatIDQP_KKT_Reference") != std::string::npos,
+        "Generated dTwin model has no expected model name."
+    );
+    require(
+        model.find("maxIter=123") != std::string::npos,
+        "Generated dTwin model ignored maxIterations."
+    );
+    require(
+        model.find("x_1") != std::string::npos
+            && model.find("y_1") != std::string::npos
+            && model.find("s_1") != std::string::npos
+            && model.find("z_1") != std::string::npos,
+        "Generated dTwin KKT variable groups are incomplete."
+    );
+    require(
+        model.find("sqrt(s_1^2+z_1^2+2*fb_tau)-s_1-z_1=0")
+            != std::string::npos,
+        "Generated dTwin model has no smooth complementarity equation."
+    );
+}
+
+void testDTwinComparisonLevels()
+{
+    const natid_qp::QPProblem problem = natid_qp::makeInequalityDemoProblem();
+    const natid_qp::Solution solution =
+        natid_qp::InteriorPointSolver(testOptions()).solve(problem);
+    require(solution.converged(), "Comparison fixture QP did not converge.");
+
+    natid_qp::DTwinReferenceResult exact =
+        makeReferenceResult(problem, solution);
+    require(
+        natid_qp::compareWithDTwin(solution, exact, 1e-9).level
+            == natid_qp::MatchLevel::ExactMatch,
+        "Identical solutions were not classified as an exact match."
+    );
+
+    natid_qp::DTwinReferenceResult close = exact;
+    close.x[0] += 5e-7;
+    natid_qp::evaluateDTwinReference(problem, close);
+    require(
+        natid_qp::compareWithDTwin(solution, close, 1e-9).level
+            == natid_qp::MatchLevel::CloseMatch,
+        "Small perturbation was not classified as a close match."
+    );
+
+    natid_qp::DTwinReferenceResult partial = exact;
+    partial.x[0] += 2e-4;
+    natid_qp::evaluateDTwinReference(problem, partial);
+    require(
+        natid_qp::compareWithDTwin(solution, partial, 1e-9).level
+            == natid_qp::MatchLevel::PartialMatch,
+        "Moderate perturbation was not classified as a partial match."
+    );
+
+    natid_qp::DTwinReferenceResult mismatch = exact;
+    mismatch.x[0] += 1.0;
+    natid_qp::evaluateDTwinReference(problem, mismatch);
+    require(
+        natid_qp::compareWithDTwin(solution, mismatch, 1e-9).level
+            == natid_qp::MatchLevel::Mismatch,
+        "Materially different solution was not classified as a mismatch."
+    );
+
+    natid_qp::DTwinReferenceResult failed;
+    failed.status = natid_qp::DTwinStatus::SolverFailure;
+    require(
+        natid_qp::compareWithDTwin(solution, failed, 1e-9).level
+            == natid_qp::MatchLevel::NotCompared,
+        "Failed dTwin solve should not produce a match classification."
+    );
+}
+
 } // namespace
 
 int main()
@@ -168,6 +330,8 @@ int main()
         testEqualityOnlyProblem();
         testMatrixMarketExamples();
         testValidation();
+        testDTwinModelGeneration();
+        testDTwinComparisonLevels();
         std::cout << "All NatIDQP tests passed.\n";
         return 0;
     }
