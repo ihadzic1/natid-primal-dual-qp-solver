@@ -684,6 +684,30 @@ protected:
         return true;
     }
 
+    bool onScroll(const gui::InputDevice& inputDevice) override
+    {
+        // Ctrl/Cmd + wheel is delivered as a zoom gesture. Do not also pan if
+        // a platform forwards the same input as a scroll event.
+        if (inputDevice.isCmdOnMacOrCtrlOnOtherPressed())
+            return false;
+
+        const gui::Point& delta = inputDevice.getScrollDelta();
+        const double wheelDelta = std::abs(delta.y) > 1e-12
+            ? delta.y
+            : delta.x;
+        if (std::abs(wheelDelta) <= 1e-12)
+            return false;
+
+        const double step = wheelDelta > 0.0
+            ? c_KeyboardPanFraction
+            : -c_KeyboardPanFraction;
+        if (inputDevice.getKey().isShiftPressed())
+            panBy(-step, 0.0); // wheel up/down behaves like A/D
+        else
+            panBy(0.0, step); // wheel up/down behaves like W/S
+        return true;
+    }
+
     bool onKeyPressed(const gui::Key& key) override
     {
         if (key.isCmdOnMacOrCtrlOnOtherPressed())
@@ -834,11 +858,12 @@ public:
     })
     {
         enableResizeEvent(true);
+        registerForScrollEvents();
         setFocusable(true);
         setClipsToBounds();
         setToolTip(
-            "Zoom: mouse wheel or Ctrl+/Ctrl-. Pan: arrows or W/A/S/D. "
-            "Ctrl+0 resets the view."
+            "Zoom: Ctrl+wheel or Ctrl+/Ctrl-. Pan: wheel, Shift+wheel, "
+            "arrows, or W/A/S/D. Ctrl+0 resets the view."
         );
         _summary = "Solver has not been run.";
         _details = "Choose a demo problem or a QP folder.";
