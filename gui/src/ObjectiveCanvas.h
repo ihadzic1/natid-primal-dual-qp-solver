@@ -480,7 +480,7 @@ private:
             );
             drawText(
                 xLabel,
-                gui::Rect(x - 32.0, plot.bottom + 4.0, x + 32.0, bounds.bottom - 24.0),
+                gui::Rect(x - 32.0, plot.bottom + 4.0, x + 32.0, bounds.bottom - 34.0),
                 gui::Font::ID::SystemSmallest,
                 td::ColorID::SysText,
                 td::TextAlignment::Center
@@ -503,7 +503,7 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
         drawText(
             td::String("x1"),
-            gui::Rect(plot.left, bounds.bottom - 25.0, plot.right, bounds.bottom - 2.0),
+            gui::Rect(plot.left, bounds.bottom - 33.0, plot.right, bounds.bottom - 10.0),
             gui::Font::ID::SystemSmaller,
             td::ColorID::SysText,
             td::TextAlignment::Center
@@ -592,9 +592,9 @@ private:
     void drawTwoDimensionalChart(const gui::Rect& bounds) const
     {
         constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 24.0;
+        constexpr gui::CoordType rightMargin = 32.0;
         constexpr gui::CoordType topMargin = 126.0;
-        constexpr gui::CoordType bottomMargin = 55.0;
+        constexpr gui::CoordType bottomMargin = 65.0;
         const gui::Rect plot(
             bounds.left + leftMargin,
             bounds.top + topMargin,
@@ -667,9 +667,9 @@ private:
     void drawObjectiveHistory(const gui::Rect& bounds) const
     {
         constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 24.0;
+        constexpr gui::CoordType rightMargin = 32.0;
         constexpr gui::CoordType topMargin = 126.0;
-        constexpr gui::CoordType bottomMargin = 55.0;
+        constexpr gui::CoordType bottomMargin = 65.0;
         const gui::Rect plot(
             bounds.left + leftMargin,
             bounds.top + topMargin,
@@ -789,7 +789,7 @@ private:
             const gui::CoordType x = mapX(index);
             drawText(
                 label,
-                gui::Rect(x - 24.0, plot.bottom + 4.0, x + 24.0, bounds.bottom - 24.0),
+                gui::Rect(x - 24.0, plot.bottom + 4.0, x + 24.0, bounds.bottom - 34.0),
                 gui::Font::ID::SystemSmallest,
                 td::ColorID::SysText,
                 td::TextAlignment::Center
@@ -798,7 +798,7 @@ private:
 
         drawText(
             td::String("iteration"),
-            gui::Rect(plot.left, bounds.bottom - 25.0, plot.right, bounds.bottom - 2.0),
+            gui::Rect(plot.left, bounds.bottom - 33.0, plot.right, bounds.bottom - 10.0),
             gui::Font::ID::SystemSmaller,
             td::ColorID::SysText,
             td::TextAlignment::Center

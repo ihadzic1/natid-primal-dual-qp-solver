@@ -274,9 +274,9 @@ private:
     void drawChart(const gui::Rect& bounds)
     {
         constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 24.0;
+        constexpr gui::CoordType rightMargin = 32.0;
         constexpr gui::CoordType topMargin = 184.0;
-        constexpr gui::CoordType bottomMargin = 58.0;
+        constexpr gui::CoordType bottomMargin = 68.0;
 
         const gui::Rect plot(
             bounds.left + leftMargin,
@@ -356,7 +356,7 @@ private:
                 label.format("%llu", static_cast<unsigned long long>(index));
                 drawText(
                     label,
-                    gui::Rect(x - 22.0, plot.bottom + 5.0, x + 22.0, bounds.bottom - 25.0),
+                    gui::Rect(x - 22.0, plot.bottom + 5.0, x + 22.0, bounds.bottom - 35.0),
                     gui::Font::ID::SystemSmallest,
                     td::ColorID::SysText,
                     td::TextAlignment::Center
@@ -406,7 +406,7 @@ private:
         const td::String xAxis("iteration");
         drawText(
             xAxis,
-            gui::Rect(plot.left, bounds.bottom - 27.0, plot.right, bounds.bottom - 3.0),
+            gui::Rect(plot.left, bounds.bottom - 34.0, plot.right, bounds.bottom - 10.0),
             gui::Font::ID::SystemSmaller,
             td::ColorID::SysText,
             td::TextAlignment::Center

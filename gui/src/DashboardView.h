@@ -84,6 +84,7 @@ private:
     AnimationSpeedSlider _speedSlider;
     gui::Label _speedValueLabel;
     gui::HorizontalLayout _animationLayout;
+    gui::HorizontalLayout _chartLayout;
     gui::VerticalLayout _layout;
     gui::Timer _playbackTimer;
     ProblemSource _problemSource = ProblemSource::None;
@@ -392,8 +393,9 @@ public:
     , _scaleComboBox("Convergence chart scale")
     , _speedLabel("Animation speed:")
     , _speedValueLabel("1.00x")
-    , _animationLayout(11)
-    , _layout(4)
+    , _animationLayout(12)
+    , _chartLayout(2)
+    , _layout(5)
     , _playbackTimer(
         this,
         static_cast<float>(c_BasePlaybackIntervalSeconds),
@@ -436,6 +438,9 @@ public:
             << _speedLabel
             << _speedSlider
             << _speedValueLabel;
+        // Keep the final value away from the rounded/right window edge even
+        // when the horizontal controls consume their full minimum width.
+        _animationLayout.appendSpace(18);
         _animationLayout.setSpaceBetweenCells(8);
 
         _scaleComboBox.addItem("Linear");
@@ -449,11 +454,20 @@ public:
         _charts.addView(&_residualsChart, "Residuals");
         _charts.setCurrentViewPos(0);
 
+        // A real layout cell is used as the right safe inset. This remains
+        // effective when the tab view expands during a maximize operation.
+        _chartLayout << _charts;
+        _chartLayout.appendSpace(18);
+        _chartLayout.setSpaceBetweenCells(0);
+
         _layout
             << _problemLayout
             << _setupLayout
             << _animationLayout
-            << _charts;
+            << _chartLayout;
+        // Reserve the Windows taskbar/safe-area strip. It also prevents the
+        // canvas axis labels from touching the bottom rounded corners.
+        _layout.appendSpace(36);
         _layout.setSpaceBetweenCells(10);
         setLayout(&_layout);
 
