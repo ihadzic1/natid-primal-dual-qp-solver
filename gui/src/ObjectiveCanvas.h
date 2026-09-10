@@ -6,6 +6,7 @@
 #include <gui/Canvas.h>
 #include <gui/DrawableString.h>
 #include <gui/Shape.h>
+#include <gui/Transformation.h>
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,14 @@
 class ObjectiveCanvas final : public gui::Canvas
 {
 private:
+    static constexpr double c_KeyboardZoomFactor = 1.25;
+    static constexpr double c_KeyboardPanFraction = 0.12;
+    static constexpr double c_MaximumZoom = 64.0;
+    static constexpr gui::CoordType c_LeftMargin = 78.0;
+    static constexpr gui::CoordType c_RightMargin = 32.0;
+    static constexpr gui::CoordType c_TopMargin = 126.0;
+    static constexpr gui::CoordType c_BottomMargin = 65.0;
+
     struct Constraint2D
     {
         double a = 0.0;
@@ -39,6 +48,17 @@ private:
     double _xMaximum = 1.0;
     double _yMinimum = -1.0;
     double _yMaximum = 1.0;
+    double _fullXMinimum = -1.0;
+    double _fullXMaximum = 1.0;
+    double _fullYMinimum = -1.0;
+    double _fullYMaximum = 1.0;
+    double _historyXMinimum = 0.0;
+    double _historyXMaximum = 1.0;
+    double _objectiveMinimum = -1.0;
+    double _objectiveMaximum = 1.0;
+    double _fullObjectiveMinimum = -1.0;
+    double _fullObjectiveMaximum = 1.0;
+    double _zoomLevel = 1.0;
     bool _hasData = false;
     bool _converged = false;
 
@@ -68,6 +88,18 @@ private:
             + (_q[1] + _q[2]) * x * y
             + _q[3] * y * y
         ) + _c[0] * x + _c[1] * y;
+    }
+
+    [[nodiscard]] gui::Rect plotBounds() const
+    {
+        gui::Size size;
+        getSize(size);
+        return gui::Rect(
+            c_LeftMargin,
+            c_TopMargin,
+            size.width - c_RightMargin,
+            size.height - c_BottomMargin
+        );
     }
 
     [[nodiscard]] gui::CoordType mapDataX(
@@ -161,6 +193,234 @@ private:
         _xMaximum = centerX + halfSpan;
         _yMinimum = centerY - halfSpan;
         _yMaximum = centerY + halfSpan;
+    }
+
+    void updateObjectiveRange()
+    {
+        double minimum = std::numeric_limits<double>::infinity();
+        double maximum = -std::numeric_limits<double>::infinity();
+        for (const natid_qp::IterationStats& stats : _history)
+        {
+            if (std::isfinite(stats.objective))
+            {
+                minimum = std::min(minimum, stats.objective);
+                maximum = std::max(maximum, stats.objective);
+            }
+        }
+        if (!std::isfinite(minimum) || !std::isfinite(maximum))
+        {
+            minimum = -1.0;
+            maximum = 1.0;
+        }
+        double range = maximum - minimum;
+        if (range <= std::numeric_limits<double>::epsilon())
+            range = std::max(1.0, std::abs(maximum));
+        _fullObjectiveMinimum = minimum - 0.08 * range;
+        _fullObjectiveMaximum = maximum + 0.08 * range;
+    }
+
+    void resetZoom()
+    {
+        _zoomLevel = 1.0;
+        _xMinimum = _fullXMinimum;
+        _xMaximum = _fullXMaximum;
+        _yMinimum = _fullYMinimum;
+        _yMaximum = _fullYMaximum;
+        _historyXMinimum = 0.0;
+        _historyXMaximum = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        _objectiveMinimum = _fullObjectiveMinimum;
+        _objectiveMaximum = _fullObjectiveMaximum;
+    }
+
+    static void keepIntervalInside(
+        double& minimum,
+        double& maximum,
+        const double fullMinimum,
+        const double fullMaximum
+    )
+    {
+        if (minimum < fullMinimum)
+        {
+            maximum += fullMinimum - minimum;
+            minimum = fullMinimum;
+        }
+        if (maximum > fullMaximum)
+        {
+            minimum -= maximum - fullMaximum;
+            maximum = fullMaximum;
+        }
+    }
+
+    void zoomAt(const double requestedFactor, const gui::Point& requestedAnchor)
+    {
+        if (!_hasData || !std::isfinite(requestedFactor) || requestedFactor <= 0.0)
+            return;
+
+        const gui::Rect plot = plotBounds();
+        if (plot.width() <= 0.0 || plot.height() <= 0.0)
+            return;
+
+        const double fullHistorySpan = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        const double maximumZoom = _variables == 2
+            ? c_MaximumZoom
+            : std::max(1.0, std::min(c_MaximumZoom, fullHistorySpan));
+        const double newZoom = std::clamp(
+            _zoomLevel * requestedFactor,
+            1.0,
+            maximumZoom
+        );
+        const double effectiveFactor = newZoom / _zoomLevel;
+        if (std::abs(effectiveFactor - 1.0) <= 1e-12)
+            return;
+
+        if (newZoom <= 1.0 + 1e-12)
+        {
+            resetZoom();
+            reDraw();
+            return;
+        }
+
+        const gui::Point anchor = plot.contains(requestedAnchor)
+            ? requestedAnchor
+            : gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            );
+        const double xRatio = std::clamp(
+            (anchor.x - plot.left) / plot.width(),
+            0.0,
+            1.0
+        );
+        const double yRatio = std::clamp(
+            (anchor.y - plot.top) / plot.height(),
+            0.0,
+            1.0
+        );
+
+        if (_variables == 2)
+        {
+            const double anchorX = _xMinimum
+                + xRatio * (_xMaximum - _xMinimum);
+            const double anchorY = _yMaximum
+                - yRatio * (_yMaximum - _yMinimum);
+            _xMinimum = anchorX - (anchorX - _xMinimum) / effectiveFactor;
+            _xMaximum = anchorX + (_xMaximum - anchorX) / effectiveFactor;
+            _yMinimum = anchorY - (anchorY - _yMinimum) / effectiveFactor;
+            _yMaximum = anchorY + (_yMaximum - anchorY) / effectiveFactor;
+            keepIntervalInside(
+                _xMinimum,
+                _xMaximum,
+                _fullXMinimum,
+                _fullXMaximum
+            );
+            keepIntervalInside(
+                _yMinimum,
+                _yMaximum,
+                _fullYMinimum,
+                _fullYMaximum
+            );
+        }
+        else
+        {
+            const double anchorX = _historyXMinimum
+                + xRatio * (_historyXMaximum - _historyXMinimum);
+            const double anchorY = _objectiveMaximum
+                - yRatio * (_objectiveMaximum - _objectiveMinimum);
+            _historyXMinimum = anchorX
+                - (anchorX - _historyXMinimum) / effectiveFactor;
+            _historyXMaximum = anchorX
+                + (_historyXMaximum - anchorX) / effectiveFactor;
+            _objectiveMinimum = anchorY
+                - (anchorY - _objectiveMinimum) / effectiveFactor;
+            _objectiveMaximum = anchorY
+                + (_objectiveMaximum - anchorY) / effectiveFactor;
+            keepIntervalInside(
+                _historyXMinimum,
+                _historyXMaximum,
+                0.0,
+                fullHistorySpan
+            );
+            keepIntervalInside(
+                _objectiveMinimum,
+                _objectiveMaximum,
+                _fullObjectiveMinimum,
+                _fullObjectiveMaximum
+            );
+        }
+
+        _zoomLevel = newZoom;
+        reDraw();
+    }
+
+    void zoomAtCenter(const double factor)
+    {
+        const gui::Rect plot = plotBounds();
+        zoomAt(
+            factor,
+            gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            )
+        );
+    }
+
+    void panBy(const double horizontalFraction, const double verticalFraction)
+    {
+        if (!_hasData || _zoomLevel <= 1.0 + 1e-12)
+            return;
+
+        if (_variables == 2)
+        {
+            const double xShift = horizontalFraction * (_xMaximum - _xMinimum);
+            const double yShift = verticalFraction * (_yMaximum - _yMinimum);
+            _xMinimum += xShift;
+            _xMaximum += xShift;
+            _yMinimum += yShift;
+            _yMaximum += yShift;
+            keepIntervalInside(
+                _xMinimum,
+                _xMaximum,
+                _fullXMinimum,
+                _fullXMaximum
+            );
+            keepIntervalInside(
+                _yMinimum,
+                _yMaximum,
+                _fullYMinimum,
+                _fullYMaximum
+            );
+        }
+        else
+        {
+            const double fullHistorySpan = _history.size() > 1
+                ? static_cast<double>(_history.size() - 1)
+                : 1.0;
+            const double xShift = horizontalFraction
+                * (_historyXMaximum - _historyXMinimum);
+            const double yShift = verticalFraction
+                * (_objectiveMaximum - _objectiveMinimum);
+            _historyXMinimum += xShift;
+            _historyXMaximum += xShift;
+            _objectiveMinimum += yShift;
+            _objectiveMaximum += yShift;
+            keepIntervalInside(
+                _historyXMinimum,
+                _historyXMaximum,
+                0.0,
+                fullHistorySpan
+            );
+            keepIntervalInside(
+                _objectiveMinimum,
+                _objectiveMaximum,
+                _fullObjectiveMinimum,
+                _fullObjectiveMaximum
+            );
+        }
+        reDraw();
     }
 
     void updatePlaybackText()
@@ -591,15 +851,11 @@ private:
 
     void drawTwoDimensionalChart(const gui::Rect& bounds) const
     {
-        constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 32.0;
-        constexpr gui::CoordType topMargin = 126.0;
-        constexpr gui::CoordType bottomMargin = 65.0;
         const gui::Rect plot(
-            bounds.left + leftMargin,
-            bounds.top + topMargin,
-            bounds.right - rightMargin,
-            bounds.bottom - bottomMargin
+            bounds.left + c_LeftMargin,
+            bounds.top + c_TopMargin,
+            bounds.right - c_RightMargin,
+            bounds.bottom - c_BottomMargin
         );
 
         if (plot.width() < 180.0 || plot.height() < 140.0)
@@ -616,12 +872,19 @@ private:
         }
 
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
+        gui::Transformation::saveContext();
+        gui::Transformation::setClip(plot);
         drawFeasibleRegion(plot);
+        gui::Transformation::restoreContext();
         drawAxesAndTicks(bounds, plot);
+        gui::Transformation::saveContext();
+        gui::Transformation::setClip(plot);
         drawContours(plot);
         drawConstraintBoundaries(plot);
         drawOptimum(plot);
         drawPath(plot);
+        gui::Transformation::restoreContext();
+        gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
         const gui::CoordType legendY = plot.top - 17.0;
         gui::Shape::drawLine(
@@ -666,15 +929,11 @@ private:
 
     void drawObjectiveHistory(const gui::Rect& bounds) const
     {
-        constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 32.0;
-        constexpr gui::CoordType topMargin = 126.0;
-        constexpr gui::CoordType bottomMargin = 65.0;
         const gui::Rect plot(
-            bounds.left + leftMargin,
-            bounds.top + topMargin,
-            bounds.right - rightMargin,
-            bounds.bottom - bottomMargin
+            bounds.left + c_LeftMargin,
+            bounds.top + c_TopMargin,
+            bounds.right - c_RightMargin,
+            bounds.bottom - c_BottomMargin
         );
         if (plot.width() < 180.0 || plot.height() < 140.0)
         {
@@ -689,38 +948,20 @@ private:
             return;
         }
 
-        double minimum = std::numeric_limits<double>::infinity();
-        double maximum = -std::numeric_limits<double>::infinity();
-        for (const natid_qp::IterationStats& stats : _history)
-        {
-            if (std::isfinite(stats.objective))
-            {
-                minimum = std::min(minimum, stats.objective);
-                maximum = std::max(maximum, stats.objective);
-            }
-        }
-        if (!std::isfinite(minimum) || !std::isfinite(maximum))
-        {
-            minimum = -1.0;
-            maximum = 1.0;
-        }
-        double range = maximum - minimum;
-        if (range <= std::numeric_limits<double>::epsilon())
-            range = std::max(1.0, std::abs(maximum));
-        minimum -= 0.08 * range;
-        maximum += 0.08 * range;
-
         const auto mapX = [&plot, this](const std::size_t index)
         {
-            if (_history.size() <= 1)
+            const double range = _historyXMaximum - _historyXMinimum;
+            if (range <= std::numeric_limits<double>::epsilon())
                 return plot.left + 0.5 * plot.width();
             return plot.left
-                + static_cast<double>(index) / (_history.size() - 1) * plot.width();
+                + (static_cast<double>(index) - _historyXMinimum)
+                    / range * plot.width();
         };
-        const auto mapY = [&plot, minimum, maximum](const double value)
+        const auto mapY = [&plot, this](const double value)
         {
             return plot.bottom
-                - (value - minimum) / (maximum - minimum) * plot.height();
+                - (value - _objectiveMinimum)
+                    / (_objectiveMaximum - _objectiveMinimum) * plot.height();
         };
 
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
@@ -738,7 +979,11 @@ private:
                 0.3f
             );
             td::String label;
-            label.format("%.4g", maximum - ratio * (maximum - minimum));
+            label.format(
+                "%.4g",
+                _objectiveMaximum
+                    - ratio * (_objectiveMaximum - _objectiveMinimum)
+            );
             drawText(
                 label,
                 gui::Rect(bounds.left + 4.0, y - 11.0, plot.left - 7.0, y + 11.0),
@@ -750,7 +995,23 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
         const std::size_t count = std::min(_visiblePointCount, _history.size());
-        for (std::size_t index = 1; index < count; ++index)
+        gui::Transformation::saveContext();
+        gui::Transformation::setClip(plot);
+        const std::size_t firstVisibleIndex = count == 0
+            ? 0
+            : std::min(
+                static_cast<std::size_t>(std::floor(_historyXMinimum)),
+                count - 1
+            );
+        const std::size_t lastVisibleIndex = count == 0
+            ? 0
+            : std::min(
+                static_cast<std::size_t>(std::ceil(_historyXMaximum)),
+                count - 1
+            );
+        for (std::size_t index = firstVisibleIndex + 1;
+             count > 0 && index <= lastVisibleIndex;
+             ++index)
         {
             gui::Shape::drawLine(
                 gui::Point(mapX(index - 1), mapY(_history[index - 1].objective)),
@@ -777,13 +1038,34 @@ private:
                 1.0f
             );
         }
+        gui::Transformation::restoreContext();
+        gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
-        const std::size_t tickCount = std::min<std::size_t>(6, _history.size());
+        const std::size_t firstTick = _history.empty()
+            ? 0
+            : std::min(
+                static_cast<std::size_t>(std::ceil(_historyXMinimum - 1e-9)),
+                _history.size() - 1
+            );
+        const std::size_t lastTick = _history.empty()
+            ? 0
+            : std::min(
+                static_cast<std::size_t>(std::floor(_historyXMaximum + 1e-9)),
+                _history.size() - 1
+            );
+        const std::size_t availableTicks = !_history.empty() && lastTick >= firstTick
+            ? lastTick - firstTick + 1
+            : 0;
+        const std::size_t tickCount = std::min<std::size_t>(6, availableTicks);
+        std::size_t previousTick = _history.size();
         for (std::size_t tick = 0; tick < tickCount; ++tick)
         {
             const std::size_t index = tickCount <= 1
-                ? 0
-                : tick * (_history.size() - 1) / (tickCount - 1);
+                ? firstTick
+                : firstTick + tick * (lastTick - firstTick) / (tickCount - 1);
+            if (index == previousTick)
+                continue;
+            previousTick = index;
             td::String label;
             label.format("%d", _history[index].iteration);
             const gui::CoordType x = mapX(index);
@@ -812,6 +1094,81 @@ private:
     }
 
 protected:
+    void onPrimaryButtonPressed(const gui::InputDevice&) override
+    {
+        setFocus(false);
+    }
+
+    bool onZoom(const gui::InputDevice& inputDevice) override
+    {
+        // getModelPoint() uses this canvas' local drawing coordinates, so the
+        // data value below the mouse remains fixed while the viewport changes.
+        zoomAt(inputDevice.getScale(), inputDevice.getModelPoint());
+        return true;
+    }
+
+    bool onKeyPressed(const gui::Key& key) override
+    {
+        if (key.isCmdOnMacOrCtrlOnOtherPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == '+' || character == '='
+                || virtualKey == gui::Key::Virtual::NumPlus)
+            {
+                zoomAtCenter(c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '-' || character == '_'
+                || virtualKey == gui::Key::Virtual::NumMinus)
+            {
+                zoomAtCenter(1.0 / c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '0' || virtualKey == gui::Key::Virtual::Num0)
+            {
+                resetZoom();
+                reDraw();
+                return true;
+            }
+        }
+
+        if (!key.isAltCtrlOrCmdPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == 'a' || character == 'A'
+                || virtualKey == gui::Key::Virtual::Left
+                || virtualKey == gui::Key::Virtual::NumLeft)
+            {
+                panBy(-c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'd' || character == 'D'
+                || virtualKey == gui::Key::Virtual::Right
+                || virtualKey == gui::Key::Virtual::NumRight)
+            {
+                panBy(c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'w' || character == 'W'
+                || virtualKey == gui::Key::Virtual::Up
+                || virtualKey == gui::Key::Virtual::NumUp)
+            {
+                panBy(0.0, c_KeyboardPanFraction);
+                return true;
+            }
+            if (character == 's' || character == 'S'
+                || virtualKey == gui::Key::Virtual::Down
+                || virtualKey == gui::Key::Virtual::NumDown)
+            {
+                panBy(0.0, -c_KeyboardPanFraction);
+                return true;
+            }
+        }
+        return gui::Canvas::onKeyPressed(key);
+    }
+
     void onDraw(const gui::Rect&) override
     {
         gui::Size size;
@@ -871,8 +1228,19 @@ protected:
 
 public:
     ObjectiveCanvas()
+    : gui::Canvas({
+        gui::InputDevice::Event::PrimaryClicks,
+        gui::InputDevice::Event::Zoom,
+        gui::InputDevice::Event::Keyboard
+    })
     {
         enableResizeEvent(true);
+        setFocusable(true);
+        setClipsToBounds();
+        setToolTip(
+            "Zoom: mouse wheel or Ctrl+/Ctrl-. Pan: arrows or W/A/S/D. "
+            "Ctrl+0 resets the view."
+        );
         _summary = "Solver has not been run.";
         _details = "Choose a demo problem or a QP folder.";
     }
@@ -922,8 +1290,14 @@ public:
                 _optimum = {x(0), x(1)};
             }
             updateDomain();
+            _fullXMinimum = _xMinimum;
+            _fullXMaximum = _xMaximum;
+            _fullYMinimum = _yMinimum;
+            _fullYMaximum = _yMaximum;
         }
 
+        updateObjectiveRange();
+        resetZoom();
         updatePlaybackText();
         reDraw();
     }
@@ -946,6 +1320,13 @@ public:
         _variables = 0;
         _hasData = false;
         _converged = false;
+        _fullXMinimum = -1.0;
+        _fullXMaximum = 1.0;
+        _fullYMinimum = -1.0;
+        _fullYMaximum = 1.0;
+        _fullObjectiveMinimum = -1.0;
+        _fullObjectiveMaximum = 1.0;
+        resetZoom();
         _summary = "Solver error";
         _details = message;
         reDraw();

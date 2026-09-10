@@ -7,6 +7,7 @@
 #include <gui/Canvas.h>
 #include <gui/DrawableString.h>
 #include <gui/Shape.h>
+#include <gui/Transformation.h>
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +30,13 @@ public:
 
 private:
     static constexpr double c_LogFloor = -12.0;
+    static constexpr double c_KeyboardZoomFactor = 1.25;
+    static constexpr double c_KeyboardPanFraction = 0.12;
+    static constexpr double c_MaximumZoom = 64.0;
+    static constexpr gui::CoordType c_LeftMargin = 78.0;
+    static constexpr gui::CoordType c_RightMargin = 32.0;
+    static constexpr gui::CoordType c_TopMargin = 184.0;
+    static constexpr gui::CoordType c_BottomMargin = 68.0;
 
     std::vector<double> _primal;
     std::vector<double> _dual;
@@ -51,6 +59,11 @@ private:
     double _tolerance = 1e-8;
     double _yMinimum = -12.0;
     double _yMaximum = 1.0;
+    double _fullYMinimum = -12.0;
+    double _fullYMaximum = 1.0;
+    double _viewXMinimum = 0.0;
+    double _viewXMaximum = 1.0;
+    double _zoomLevel = 1.0;
     ScaleMode _scaleMode = ScaleMode::Log10;
     bool _converged = false;
     bool _hasData = false;
@@ -121,17 +134,29 @@ private:
         return "value";
     }
 
-    static gui::CoordType mapX(
-        const std::size_t index,
-        const std::size_t count,
-        const gui::Rect& plot
-    )
+    [[nodiscard]] gui::Rect plotBounds() const
     {
-        if (count <= 1)
+        gui::Size size;
+        getSize(size);
+        return gui::Rect(
+            c_LeftMargin,
+            c_TopMargin,
+            size.width - c_RightMargin,
+            size.height - c_BottomMargin
+        );
+    }
+
+    [[nodiscard]] gui::CoordType mapX(
+        const std::size_t index,
+        const gui::Rect& plot
+    ) const
+    {
+        const double range = _viewXMaximum - _viewXMinimum;
+        if (range <= std::numeric_limits<double>::epsilon())
             return plot.left;
-        const double position =
-            static_cast<double>(index) / static_cast<double>(count - 1);
-        return plot.left + position * plot.width();
+        return plot.left
+            + (static_cast<double>(index) - _viewXMinimum)
+                / range * plot.width();
     }
 
     gui::CoordType mapY(const double value, const gui::Rect& plot) const
@@ -141,6 +166,149 @@ private:
             return plot.bottom;
         const double normalized = (value - _yMinimum) / range;
         return plot.bottom - normalized * plot.height();
+    }
+
+    void resetZoom()
+    {
+        _zoomLevel = 1.0;
+        _viewXMinimum = 0.0;
+        _viewXMaximum = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        _yMinimum = _fullYMinimum;
+        _yMaximum = _fullYMaximum;
+    }
+
+    void zoomAt(const double requestedFactor, const gui::Point& requestedAnchor)
+    {
+        if (!_hasData || !std::isfinite(requestedFactor) || requestedFactor <= 0.0)
+            return;
+
+        const gui::Rect plot = plotBounds();
+        if (plot.width() <= 0.0 || plot.height() <= 0.0)
+            return;
+
+        const double fullXSpan = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        const double maximumZoom = std::max(
+            1.0,
+            std::min(c_MaximumZoom, fullXSpan)
+        );
+        const double newZoom = std::clamp(
+            _zoomLevel * requestedFactor,
+            1.0,
+            maximumZoom
+        );
+        const double effectiveFactor = newZoom / _zoomLevel;
+        if (std::abs(effectiveFactor - 1.0) <= 1e-12)
+            return;
+
+        if (newZoom <= 1.0 + 1e-12)
+        {
+            resetZoom();
+            reDraw();
+            return;
+        }
+
+        const gui::Point anchor = plot.contains(requestedAnchor)
+            ? requestedAnchor
+            : gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            );
+        const double xRatio = std::clamp(
+            (anchor.x - plot.left) / plot.width(),
+            0.0,
+            1.0
+        );
+        const double yRatio = std::clamp(
+            (anchor.y - plot.top) / plot.height(),
+            0.0,
+            1.0
+        );
+        const double anchorX = _viewXMinimum
+            + xRatio * (_viewXMaximum - _viewXMinimum);
+        const double anchorY = _yMaximum
+            - yRatio * (_yMaximum - _yMinimum);
+
+        _viewXMinimum = anchorX
+            - (anchorX - _viewXMinimum) / effectiveFactor;
+        _viewXMaximum = anchorX
+            + (_viewXMaximum - anchorX) / effectiveFactor;
+        _yMinimum = anchorY - (anchorY - _yMinimum) / effectiveFactor;
+        _yMaximum = anchorY + (_yMaximum - anchorY) / effectiveFactor;
+
+        const auto keepInside = [](double& minimum,
+                                   double& maximum,
+                                   const double fullMinimum,
+                                   const double fullMaximum)
+        {
+            if (minimum < fullMinimum)
+            {
+                maximum += fullMinimum - minimum;
+                minimum = fullMinimum;
+            }
+            if (maximum > fullMaximum)
+            {
+                minimum -= maximum - fullMaximum;
+                maximum = fullMaximum;
+            }
+        };
+        keepInside(_viewXMinimum, _viewXMaximum, 0.0, fullXSpan);
+        keepInside(_yMinimum, _yMaximum, _fullYMinimum, _fullYMaximum);
+        _zoomLevel = newZoom;
+        reDraw();
+    }
+
+    void zoomAtCenter(const double factor)
+    {
+        const gui::Rect plot = plotBounds();
+        zoomAt(
+            factor,
+            gui::Point(
+                plot.left + 0.5 * plot.width(),
+                plot.top + 0.5 * plot.height()
+            )
+        );
+    }
+
+    void panBy(const double horizontalFraction, const double verticalFraction)
+    {
+        if (!_hasData || _zoomLevel <= 1.0 + 1e-12)
+            return;
+
+        const double fullXSpan = _history.size() > 1
+            ? static_cast<double>(_history.size() - 1)
+            : 1.0;
+        const double xShift = horizontalFraction
+            * (_viewXMaximum - _viewXMinimum);
+        const double yShift = verticalFraction
+            * (_yMaximum - _yMinimum);
+        _viewXMinimum += xShift;
+        _viewXMaximum += xShift;
+        _yMinimum += yShift;
+        _yMaximum += yShift;
+
+        const auto keepInside = [](double& minimum,
+                                   double& maximum,
+                                   const double fullMinimum,
+                                   const double fullMaximum)
+        {
+            if (minimum < fullMinimum)
+            {
+                maximum += fullMinimum - minimum;
+                minimum = fullMinimum;
+            }
+            if (maximum > fullMaximum)
+            {
+                minimum -= maximum - fullMaximum;
+                maximum = fullMaximum;
+            }
+        };
+        keepInside(_viewXMinimum, _viewXMaximum, 0.0, fullXSpan);
+        keepInside(_yMinimum, _yMaximum, _fullYMinimum, _fullYMaximum);
+        reDraw();
     }
 
     void updateYRange()
@@ -164,32 +332,37 @@ private:
             _yMaximum = maximum > std::numeric_limits<double>::epsilon()
                 ? 1.05 * maximum
                 : 1.0;
-            return;
+        }
+        else
+        {
+            double minimum = displayValue(_tolerance);
+            double maximum = displayValue(_tolerance);
+
+            const auto inspect = [this, &minimum, &maximum](
+                const std::vector<double>& values
+            )
+            {
+                for (const double value : values)
+                {
+                    const double displayed = displayValue(value);
+                    minimum = std::min(minimum, displayed);
+                    maximum = std::max(maximum, displayed);
+                }
+            };
+
+            inspect(_primal);
+            inspect(_dual);
+            inspect(_mu);
+
+            _yMinimum = std::floor(minimum);
+            _yMaximum = std::ceil(maximum);
+            if (_yMaximum - _yMinimum < 2.0)
+                _yMaximum = _yMinimum + 2.0;
         }
 
-        double minimum = displayValue(_tolerance);
-        double maximum = displayValue(_tolerance);
-
-        const auto inspect = [this, &minimum, &maximum](
-            const std::vector<double>& values
-        )
-        {
-            for (const double value : values)
-            {
-                const double displayed = displayValue(value);
-                minimum = std::min(minimum, displayed);
-                maximum = std::max(maximum, displayed);
-            }
-        };
-
-        inspect(_primal);
-        inspect(_dual);
-        inspect(_mu);
-
-        _yMinimum = std::floor(minimum);
-        _yMaximum = std::ceil(maximum);
-        if (_yMaximum - _yMinimum < 2.0)
-            _yMaximum = _yMinimum + 2.0;
+        _fullYMinimum = _yMinimum;
+        _fullYMaximum = _yMaximum;
+        resetZoom();
     }
 
     static void drawText(
@@ -242,23 +415,32 @@ private:
         if (count == 0)
             return;
 
-        for (std::size_t index = 1; index < count; ++index)
+        const std::size_t firstIndex = std::min(
+            static_cast<std::size_t>(std::floor(_viewXMinimum)),
+            count - 1
+        );
+        const std::size_t lastIndex = std::min(
+            static_cast<std::size_t>(std::ceil(_viewXMaximum)),
+            count - 1
+        );
+
+        for (std::size_t index = firstIndex + 1; index <= lastIndex; ++index)
         {
             const gui::Point previous(
-                mapX(index - 1, values.size(), plot),
+                mapX(index - 1, plot),
                 mapY(displayValue(values[index - 1]), plot)
             );
             const gui::Point current(
-                mapX(index, values.size(), plot),
+                mapX(index, plot),
                 mapY(displayValue(values[index]), plot)
             );
             gui::Shape::drawLine(previous, current, color, 2.5f);
         }
 
-        for (std::size_t index = 0; index < count; ++index)
+        for (std::size_t index = firstIndex; index <= lastIndex; ++index)
         {
             const gui::Point point(
-                mapX(index, values.size(), plot),
+                mapX(index, plot),
                 mapY(displayValue(values[index]), plot)
             );
             const gui::Rect marker(
@@ -273,16 +455,11 @@ private:
 
     void drawChart(const gui::Rect& bounds)
     {
-        constexpr gui::CoordType leftMargin = 78.0;
-        constexpr gui::CoordType rightMargin = 32.0;
-        constexpr gui::CoordType topMargin = 184.0;
-        constexpr gui::CoordType bottomMargin = 68.0;
-
         const gui::Rect plot(
-            bounds.left + leftMargin,
-            bounds.top + topMargin,
-            bounds.right - rightMargin,
-            bounds.bottom - bottomMargin
+            bounds.left + c_LeftMargin,
+            bounds.top + c_TopMargin,
+            bounds.right - c_RightMargin,
+            bounds.bottom - c_BottomMargin
         );
 
         if (plot.width() < 180.0 || plot.height() < 140.0)
@@ -336,13 +513,23 @@ private:
         const std::size_t pointCount = _primal.size();
         if (pointCount > 0)
         {
-            const std::size_t tickStep =
-                pointCount <= 7 ? 1 : std::max<std::size_t>(1, (pointCount - 1) / 6);
+            const std::size_t firstTick = std::min(
+                static_cast<std::size_t>(std::ceil(_viewXMinimum - 1e-9)),
+                pointCount - 1
+            );
+            const std::size_t lastTick = std::min(
+                static_cast<std::size_t>(std::floor(_viewXMaximum + 1e-9)),
+                pointCount - 1
+            );
+            const std::size_t availableTicks = lastTick >= firstTick
+                ? lastTick - firstTick + 1
+                : 0;
+            const std::size_t tickCount = std::min<std::size_t>(7, availableTicks);
 
             const auto drawIterationTick =
-                [this, &plot, &bounds, pointCount](const std::size_t index)
+                [this, &plot, &bounds](const std::size_t index)
             {
-                const gui::CoordType x = mapX(index, pointCount, plot);
+                const gui::CoordType x = mapX(index, plot);
                 gui::Shape::drawLine(
                     gui::Point(x, plot.top),
                     gui::Point(x, plot.bottom),
@@ -353,7 +540,7 @@ private:
                 );
 
                 td::String label;
-                label.format("%llu", static_cast<unsigned long long>(index));
+                label.format("%d", _history[index].iteration);
                 drawText(
                     label,
                     gui::Rect(x - 22.0, plot.bottom + 5.0, x + 22.0, bounds.bottom - 35.0),
@@ -363,18 +550,23 @@ private:
                 );
             };
 
-            std::size_t lastTick = 0;
-            for (std::size_t index = 0; index < pointCount; index += tickStep)
+            std::size_t previousTick = pointCount;
+            for (std::size_t tick = 0; tick < tickCount; ++tick)
             {
+                const std::size_t index = tickCount <= 1
+                    ? firstTick
+                    : firstTick + tick * (lastTick - firstTick) / (tickCount - 1);
+                if (index == previousTick)
+                    continue;
                 drawIterationTick(index);
-                lastTick = index;
+                previousTick = index;
             }
-            if (lastTick != pointCount - 1)
-                drawIterationTick(pointCount - 1);
         }
 
         gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
+        gui::Transformation::saveContext();
+        gui::Transformation::setClip(plot);
         const gui::CoordType toleranceY = mapY(displayValue(_tolerance), plot);
         gui::Shape::drawLine(
             gui::Point(plot.left, toleranceY),
@@ -402,6 +594,8 @@ private:
             td::ColorID::Green,
             _visiblePointCount
         );
+        gui::Transformation::restoreContext();
+        gui::Shape::drawRect(plot, td::ColorID::SysText, 1.0f);
 
         const td::String xAxis("iteration");
         drawText(
@@ -477,6 +671,81 @@ private:
     }
 
 protected:
+    void onPrimaryButtonPressed(const gui::InputDevice&) override
+    {
+        setFocus(false);
+    }
+
+    bool onZoom(const gui::InputDevice& inputDevice) override
+    {
+        // getModelPoint() is local to this canvas. getFramePoint() is relative
+        // to the containing frame and makes the cursor anchor miss the plot.
+        zoomAt(inputDevice.getScale(), inputDevice.getModelPoint());
+        return true;
+    }
+
+    bool onKeyPressed(const gui::Key& key) override
+    {
+        if (key.isCmdOnMacOrCtrlOnOtherPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == '+' || character == '='
+                || virtualKey == gui::Key::Virtual::NumPlus)
+            {
+                zoomAtCenter(c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '-' || character == '_'
+                || virtualKey == gui::Key::Virtual::NumMinus)
+            {
+                zoomAtCenter(1.0 / c_KeyboardZoomFactor);
+                return true;
+            }
+            if (character == '0' || virtualKey == gui::Key::Virtual::Num0)
+            {
+                resetZoom();
+                reDraw();
+                return true;
+            }
+        }
+
+        if (!key.isAltCtrlOrCmdPressed())
+        {
+            const char character = key.getChar();
+            const gui::Key::Virtual virtualKey = key.getVirtual();
+            if (character == 'a' || character == 'A'
+                || virtualKey == gui::Key::Virtual::Left
+                || virtualKey == gui::Key::Virtual::NumLeft)
+            {
+                panBy(-c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'd' || character == 'D'
+                || virtualKey == gui::Key::Virtual::Right
+                || virtualKey == gui::Key::Virtual::NumRight)
+            {
+                panBy(c_KeyboardPanFraction, 0.0);
+                return true;
+            }
+            if (character == 'w' || character == 'W'
+                || virtualKey == gui::Key::Virtual::Up
+                || virtualKey == gui::Key::Virtual::NumUp)
+            {
+                panBy(0.0, c_KeyboardPanFraction);
+                return true;
+            }
+            if (character == 's' || character == 'S'
+                || virtualKey == gui::Key::Virtual::Down
+                || virtualKey == gui::Key::Virtual::NumDown)
+            {
+                panBy(0.0, -c_KeyboardPanFraction);
+                return true;
+            }
+        }
+        return gui::Canvas::onKeyPressed(key);
+    }
+
     void onDraw(const gui::Rect&) override
     {
         gui::Size size;
@@ -558,8 +827,19 @@ protected:
 
 public:
     ConvergenceCanvas()
+    : gui::Canvas({
+        gui::InputDevice::Event::PrimaryClicks,
+        gui::InputDevice::Event::Zoom,
+        gui::InputDevice::Event::Keyboard
+    })
     {
         enableResizeEvent(true);
+        setFocusable(true);
+        setClipsToBounds();
+        setToolTip(
+            "Zoom: mouse wheel or Ctrl+/Ctrl-. Pan: arrows or W/A/S/D. "
+            "Ctrl+0 resets the view."
+        );
         _summary = "Solver has not been run.";
         _details = "Choose a demo problem or a QP folder.";
         _message = "";
@@ -751,6 +1031,9 @@ public:
         _matchLevel = natid_qp::MatchLevel::NotCompared;
         _dtwinStatusText = "dTwin: not compared";
         _dtwinDifferenceText = "Primary solver error.";
+        _fullYMinimum = -12.0;
+        _fullYMaximum = 1.0;
+        resetZoom();
         reDraw();
     }
 };

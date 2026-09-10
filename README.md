@@ -150,6 +150,13 @@ animation. **Play Again** rewinds the existing history to iteration zero and
 does not run the solver again. The **Y-axis mode** selector affects the
 residual chart only.
 
+Both plots support interactive navigation. Place the pointer over a plot and
+use the mouse wheel to zoom around the data point below the pointer. Click a
+plot to give it keyboard focus, then use **Ctrl++** or **Ctrl+-** to zoom around
+its center and the arrow keys or **W/A/S/D** to pan. **Ctrl+0** restores the
+full data range. Zooming, panning, and switching tabs do not change the current
+animation iteration; loading or running a problem again resets the viewport.
+
 ## Matrix Market convention
 
 - Matrices may use `coordinate` or `array` storage.
