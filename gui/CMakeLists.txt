@@ -41,6 +41,13 @@ target_link_libraries(
         optimized ${NATGUI_LIB_RELEASE}
 )
 
+# Used by the problem quick-select in development builds. Deployed builds also
+# search the natID application resource directory populated by the installer.
+target_compile_definitions(
+    natid_qp_gui
+    PRIVATE NATID_QP_DATA_DIR="${CMAKE_CURRENT_LIST_DIR}/../data"
+)
+
 source_group("src" FILES ${NATID_QP_GUI_SOURCES})
 source_group("inc" FILES ${NATID_QP_GUI_HEADERS})
 

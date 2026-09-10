@@ -15,6 +15,9 @@
              dev="$MyBin/GTK/release/share/glib-2.0/schemas"
              dep="schemas"
              exclude="macOS,linux"/>
+        <Res type="folder"
+             dev="~Desktop/NatIDQP-Packaging-Source/data"
+             dep="data"/>
     </ResData>
     <MutableResource/>
     <Setup licenseFileName="~natID.SDK/DevEnv/License.txt"

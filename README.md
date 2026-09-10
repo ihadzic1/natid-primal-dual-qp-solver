@@ -150,6 +150,19 @@ animation. **Play Again** rewinds the existing history to iteration zero and
 does not run the solver again. The **Y-axis mode** selector affects the
 residual chart only.
 
+The **QP problem** selector replaces the two separate demo buttons. It contains
+the built-in inequality and equality demos followed by every valid problem
+folder found under `data`, in natural numeric order. Selecting an entry loads
+and solves it immediately. **Choose QP Folder** remains available for external
+problems and adds the chosen folder to the selector as a custom entry. Only
+folders containing `Q.mtx`, `c.mtx`, `G.mtx`, and `h.mtx` are listed; `A.mtx`
+and `b.mtx` must either both exist or both be absent. The installer packages
+the `data` directory so the same quick-select entries remain available after
+deployment. Data-folder discovery checks the configured source directory and
+the parent hierarchy of the source, resource, executable, and current-working
+paths, so an existing natID/Visual Studio build does not depend on a particular
+working directory or a freshly generated CMake compile definition.
+
 Both plots support interactive navigation. Place the pointer over a plot and
 use **Ctrl+mouse wheel** to zoom around the data point below the pointer. A
 plain mouse wheel pans vertically like **W/S**, while **Shift+mouse wheel** pans
