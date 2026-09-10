@@ -39,6 +39,7 @@ struct IterationStats
 {
     int iteration = 0;
     double objective = 0.0;
+    std::vector<double> x;
     double primalResidual = 0.0;
     double dualResidual = 0.0;
     double dualityGap = 0.0;

@@ -24,6 +24,52 @@ double vectorValue(const dense::DblMatrix& vector, const unsigned int row)
     return vector.getFirstColumnManipulator()(row);
 }
 
+double objectiveAt(
+    const natid_qp::QPProblem& problem,
+    const std::vector<double>& x
+)
+{
+    require(x.size() == problem.variables(), "Iteration x has a wrong size.");
+    const auto q = problem.Q.getManipulator();
+    const auto c = problem.c.getFirstColumnManipulator();
+    double value = 0.0;
+    for (unsigned int row = 0; row < problem.variables(); ++row)
+    {
+        value += c(row) * x[row];
+        for (unsigned int column = 0; column < problem.variables(); ++column)
+            value += 0.5 * x[row] * q(row, column) * x[column];
+    }
+    return value;
+}
+
+void requirePrimalHistory(
+    const natid_qp::QPProblem& problem,
+    const natid_qp::Solution& solution
+)
+{
+    require(!solution.history.empty(), "Solver returned no iteration history.");
+    for (const natid_qp::IterationStats& stats : solution.history)
+    {
+        require(
+            stats.x.size() == problem.variables(),
+            "Iteration history did not preserve the complete primal iterate."
+        );
+        require(
+            std::abs(objectiveAt(problem, stats.x) - stats.objective) < 1e-10,
+            "Stored iteration objective does not match stored x."
+        );
+    }
+
+    const natid_qp::IterationStats& finalStats = solution.history.back();
+    for (unsigned int row = 0; row < problem.variables(); ++row)
+    {
+        require(
+            std::abs(finalStats.x[row] - vectorValue(solution.x, row)) < 1e-12,
+            "Final iteration x does not match Solution::x."
+        );
+    }
+}
+
 natid_qp::SolverOptions testOptions()
 {
     natid_qp::SolverOptions options;
@@ -42,6 +88,7 @@ void testInequalityDemo()
         natid_qp::InteriorPointSolver(testOptions()).solve(problem);
 
     require(solution.converged(), "Inequality demo did not converge: " + solution.message);
+    requirePrimalHistory(problem, solution);
     require(
         std::abs(vectorValue(solution.x, 0) - 0.75) < 2e-6,
         "Wrong x1 for inequality demo."
@@ -71,6 +118,7 @@ void testEqualityDemo()
         natid_qp::InteriorPointSolver(testOptions()).solve(problem);
 
     require(solution.converged(), "Equality demo did not converge: " + solution.message);
+    requirePrimalHistory(problem, solution);
     require(
         std::abs(vectorValue(solution.x, 0) - 0.25) < 2e-6,
         "Wrong x1 for equality demo."

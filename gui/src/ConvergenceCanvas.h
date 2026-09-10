@@ -487,7 +487,7 @@ protected:
         const gui::Rect header(bounds.left, bounds.top, bounds.right, bounds.top + 158.0);
         gui::Shape::drawRect(header, td::ColorID::SysBackAlt2);
 
-        const td::String title("NatIDQP convergence dashboard");
+        const td::String title("NatIDQP residuals");
         drawText(
             title,
             gui::Rect(22.0, 10.0, bounds.right - 22.0, 42.0),
@@ -692,6 +692,15 @@ public:
     [[nodiscard]] bool isPlaybackComplete() const
     {
         return _history.empty() || _visiblePointCount >= _history.size();
+    }
+
+    void setPlaybackIndex(const std::size_t historyIndex)
+    {
+        _visiblePointCount = _history.empty()
+            ? 0
+            : std::min(historyIndex + 1, _history.size());
+        updatePlaybackText();
+        reDraw();
     }
 
     bool advancePlayback()

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ConvergenceCanvas.h"
+#include "ObjectiveCanvas.h"
 
 #include "natid_qp/InteriorPointSolver.h"
 #include "natid_qp/DTwinReferenceSolver.h"
@@ -14,12 +15,14 @@
 #include <gui/Label.h>
 #include <gui/NumericEdit.h>
 #include <gui/Slider.h>
+#include <gui/StandardTabView.h>
 #include <gui/Timer.h>
 #include <gui/VerticalLayout.h>
 #include <gui/View.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <stdexcept>
@@ -67,7 +70,9 @@ private:
     gui::NumericEdit _toleranceEdit;
     gui::Button _runAgainButton;
     gui::HorizontalLayout _setupLayout;
-    ConvergenceCanvas _chart;
+    ObjectiveCanvas _objectiveChart;
+    ConvergenceCanvas _residualsChart;
+    gui::StandardTabView _charts;
     gui::Label _animationLabel;
     gui::Button _previousStepButton;
     gui::Button _playPauseButton;
@@ -83,6 +88,23 @@ private:
     gui::Timer _playbackTimer;
     ProblemSource _problemSource = ProblemSource::None;
     std::filesystem::path _selectedFolder;
+    std::size_t _historySize = 0;
+    std::size_t _currentHistoryIndex = 0;
+
+    void syncPlayback()
+    {
+        _objectiveChart.setPlaybackIndex(_currentHistoryIndex);
+        _residualsChart.setPlaybackIndex(_currentHistoryIndex);
+    }
+
+    void setError(const char* message)
+    {
+        stopPlayback();
+        _historySize = 0;
+        _currentHistoryIndex = 0;
+        _objectiveChart.setError(message);
+        _residualsChart.setError(message);
+    }
 
     void updatePlaybackSpeed()
     {
@@ -105,11 +127,14 @@ private:
 
     void startPlayback()
     {
-        if (!_chart.hasPlaybackData())
+        if (_historySize == 0)
             return;
 
-        if (_chart.isPlaybackComplete())
-            _chart.resetPlayback();
+        if (_currentHistoryIndex + 1 >= _historySize)
+        {
+            _currentHistoryIndex = 0;
+            syncPlayback();
+        }
 
         _playPauseButton.setTitle("Pause");
         _playbackTimer.start();
@@ -126,19 +151,24 @@ private:
     void showNextStep()
     {
         stopPlayback();
-        _chart.advancePlayback();
+        if (_currentHistoryIndex + 1 < _historySize)
+            ++_currentHistoryIndex;
+        syncPlayback();
     }
 
     void showPreviousStep()
     {
         stopPlayback();
-        _chart.retreatPlayback();
+        if (_historySize > 0 && _currentHistoryIndex > 0)
+            --_currentHistoryIndex;
+        syncPlayback();
     }
 
     void playAgain()
     {
         stopPlayback();
-        _chart.resetPlayback();
+        _currentHistoryIndex = 0;
+        syncPlayback();
         startPlayback();
     }
 
@@ -223,7 +253,12 @@ private:
                     "NatIDQP did not converge, so dTwin was not run.";
             }
 
-            _chart.setSolution(
+            _objectiveChart.setSolution(
+                problem,
+                solution,
+                problemName.c_str()
+            );
+            _residualsChart.setSolution(
                 problem,
                 solution,
                 dtwinResult,
@@ -231,15 +266,18 @@ private:
                 problemName.c_str(),
                 options.tolerance
             );
+            _historySize = solution.history.size();
+            _currentHistoryIndex = 0;
+            syncPlayback();
             startPlayback();
         }
         catch (const std::exception& error)
         {
-            _chart.setError(error.what());
+            setError(error.what());
         }
         catch (...)
         {
-            _chart.setError("Unknown error while solving the selected problem.");
+            setError("Unknown error while solving the selected problem.");
         }
     }
 
@@ -275,12 +313,12 @@ private:
         catch (const std::exception& error)
         {
             stopPlayback();
-            _chart.setError(error.what());
+            setError(error.what());
         }
         catch (...)
         {
             stopPlayback();
-            _chart.setError("Unknown error while loading the selected QP folder.");
+            setError("Unknown error while loading the selected QP folder.");
         }
     }
 
@@ -298,7 +336,7 @@ private:
                 solveSelectedFolder();
                 break;
             case ProblemSource::None:
-                _chart.setError("Choose a demo problem or a QP folder first.");
+                setError("Choose a demo problem or a QP folder first.");
                 break;
         }
     }
@@ -407,11 +445,15 @@ public:
         _scaleComboBox.selectIndex(1, false);
         _scaleComboBox.sizeToFit();
 
+        _charts.addView(&_objectiveChart, "Objective Function");
+        _charts.addView(&_residualsChart, "Residuals");
+        _charts.setCurrentViewPos(0);
+
         _layout
             << _problemLayout
             << _setupLayout
             << _animationLayout
-            << _chart;
+            << _charts;
         _layout.setSpaceBetweenCells(10);
         setLayout(&_layout);
 
@@ -449,17 +491,14 @@ public:
         });
         _scaleComboBox.onChangedSelection([this]()
         {
-            stopPlayback();
             const int selectedIndex = std::clamp(
                 _scaleComboBox.getSelectedIndex(),
                 0,
                 3
             );
-            _chart.setScaleMode(
+            _residualsChart.setScaleMode(
                 static_cast<ConvergenceCanvas::ScaleMode>(selectedIndex)
             );
-            _chart.resetPlayback();
-            startPlayback();
         });
         _speedSlider.onChangedValue([this]()
         {
@@ -471,7 +510,16 @@ public:
         });
         _playbackTimer.onTimer([this]()
         {
-            if (!_chart.advancePlayback())
+            if (_historySize == 0
+                || _currentHistoryIndex + 1 >= _historySize)
+            {
+                stopPlayback();
+                return;
+            }
+
+            ++_currentHistoryIndex;
+            syncPlayback();
+            if (_currentHistoryIndex + 1 >= _historySize)
                 stopPlayback();
         });
     }

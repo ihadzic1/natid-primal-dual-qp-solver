@@ -21,6 +21,7 @@ set(NATID_QP_GUI_HEADERS
     src/ConvergenceCanvas.h
     src/DashboardView.h
     src/MainWindow.h
+    src/ObjectiveCanvas.h
 )
 
 set(NATID_QP_GUI_PLIST "${CMAKE_CURRENT_LIST_DIR}/src/Info.plist")

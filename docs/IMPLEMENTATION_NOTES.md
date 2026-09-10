@@ -80,6 +80,22 @@ residual evaluation, and comparison classification can be tested without the
 platform dTwin binary. Only the small native adapter is built into the
 `natid_qp_dtwin` target.
 
+### Synchronized objective and residual playback
+
+Every `IterationStats` record owns a standard-library copy of the primal
+iterate. This keeps the visualization history independent of natID matrix
+lifetimes while leaving the numerical solver and final `Solution::x`
+representation unchanged.
+
+`DashboardView` owns the single playback index. Each timer tick or playback
+button updates both canvases with that index; changing the selected tab does
+not modify it. The residual canvas retains all original residual, tolerance,
+Y-axis, and dTwin comparison rendering. For two-variable QPs, the objective
+canvas samples the quadratic for contours, shades points satisfying the
+inequalities, draws equality/inequality boundaries, and overlays the primal
+iterate path and converged solution. Higher-dimensional QPs use objective
+value versus iteration.
+
 ## Portable test backend
 
 The supplied natID archive contains Windows binaries, while automated

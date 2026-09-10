@@ -34,10 +34,16 @@ where \(Q\) is symmetric positive semidefinite. Inequalities are converted to
   - `sparse::Pivoting::AlterMatrixIfIndefinite`
 - One KKT factorization and two right-hand-side solves per IPM iteration.
 - Matrix Market input for coordinate and array formats.
-- Per-iteration primal residual, dual residual, duality gap, barrier value,
-  KKT nonzero count, and timing statistics.
+- Per-iteration primal iterate \(x^{(k)}\), objective value, primal residual,
+  dual residual, duality gap, barrier value, KKT nonzero count, and timing
+  statistics.
 - CSV convergence history, text solution reports, and Matrix Market solution
   export.
+- Native GUI with synchronized **Objective Function** and **Residuals** tabs,
+  shared playback controls, adjustable playback speed, and residual Y-axis
+  modes. Two-variable problems use an objective contour plot with the iterate
+  path, feasible-set overlay, and optimum marker; larger problems use
+  objective value versus iteration.
 - Two checked example problems and automated tests.
 
 The implementation does not use Eigen or another production linear algebra
@@ -50,6 +56,7 @@ NatIDQP/
   CMakeLists.txt
   include/natid_qp/        Public project headers
   src/                     Solver, Matrix Market I/O, and CLI
+  gui/                     Native synchronized objective/residual dashboard
   data/                    Small verified QP examples
   docs/                    Algorithm and implementation notes
   scripts/                 Build, benchmark generation, and plotting helpers
@@ -132,6 +139,16 @@ be omitted. `Q.mtx`, `c.mtx`, `G.mtx`, and `h.mtx` are required for an
 inequality-constrained problem.
 
 Use `natid_qp.exe --help` for all solver and output options.
+
+## Native GUI
+
+Run `natid_qp_gui` to open the dashboard. **Choose QP Folder**, the tolerance
+input, **Run Again**, playback buttons, and the animation-speed slider apply to
+the loaded solver history. The **Objective Function** and **Residuals** tabs
+share one current iteration, so switching tabs never restarts or rewinds the
+animation. **Play Again** rewinds the existing history to iteration zero and
+does not run the solver again. The **Y-axis mode** selector affects the
+residual chart only.
 
 ## Matrix Market convention
 
