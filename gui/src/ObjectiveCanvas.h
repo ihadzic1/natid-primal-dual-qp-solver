@@ -20,7 +20,7 @@ class ObjectiveCanvas final : public gui::Canvas
 private:
     static constexpr double c_KeyboardZoomFactor = 1.25;
     static constexpr double c_KeyboardPanFraction = 0.12;
-    static constexpr double c_MaximumZoom = 64.0;
+    static constexpr double c_MaximumZoom = 1'000'000.0;
     static constexpr gui::CoordType c_LeftMargin = 78.0;
     static constexpr gui::CoordType c_RightMargin = 32.0;
     static constexpr gui::CoordType c_TopMargin = 126.0;
