@@ -75,6 +75,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $setups | Out-Null
           Copy-Item "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\*" $setups -Recurse -Force
           Copy-Item "packaging\NatIDQP.xml" "$setups\NatIDQP.xml" -Force
+          Copy-Item "packaging\modSolver.xml" "$setups\Packages\modSolver.xml" -Force
           Copy-Item "packaging\GTK4.xml" "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\Packages\GTK4.xml" -Force
 
           & "$env:USERPROFILE\natID.Utils\windows\SetupCollector.exe" "$setups\NatIDQP.xml"
@@ -171,6 +172,8 @@ jobs:
           sudo ln -s "$HOME/natID.RAMDisk" /Volumes/RAMDisk
           cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
           cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
+            "$HOME/NatIDQP.Setups/Packages/modSolver.xml"
           chmod +x "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector"
           "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector" \
             "$HOME/NatIDQP.Setups/NatIDQP.xml"
@@ -263,6 +266,8 @@ jobs:
           sudo ln -s "$HOME/natID.RAMDisk" /media/RAMDisk
           cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
           cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
+            "$HOME/NatIDQP.Setups/Packages/modSolver.xml"
           chmod +x "$HOME/natID.Utils/linux/SetupCollector"
           "$HOME/natID.Utils/linux/SetupCollector" "$HOME/NatIDQP.Setups/NatIDQP.xml"
 

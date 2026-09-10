@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<Package>
+    <Group type="dynLib" path="$MyDLib" subFolder="">
+        <File name="modSolver" debugName="modSolverD" adjustRPath="true"/>
+    </Group>
+</Package>

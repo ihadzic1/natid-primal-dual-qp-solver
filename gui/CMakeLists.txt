@@ -3,10 +3,10 @@ if(NATID_QP_PORTABLE_TEST_BACKEND)
     return()
 endif()
 
-if(NOT TARGET natid_qp_core)
+if(NOT TARGET natid_qp_core OR NOT TARGET natid_qp_dtwin)
     message(FATAL_ERROR
         "natid_qp_gui must be added from the NatIDQP root project, "
-        "after the natid_qp_core target is created."
+        "after the natid_qp_core and natid_qp_dtwin targets are created."
     )
 endif()
 
@@ -35,6 +35,7 @@ target_link_libraries(
     natid_qp_gui
     PRIVATE
         natid_qp_core
+        natid_qp_dtwin
         debug ${NATGUI_LIB_DEBUG}
         optimized ${NATGUI_LIB_RELEASE}
 )

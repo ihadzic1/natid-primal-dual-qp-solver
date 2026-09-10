@@ -1,6 +1,7 @@
 #pragma once
 
 #include "natid_qp/InteriorPointSolver.h"
+#include "natid_qp/DTwinReferenceSolver.h"
 #include "natid_qp/QPProblem.h"
 
 #include <gui/Canvas.h>
@@ -31,6 +32,8 @@ private:
     td::String _message;
     td::String _finalStatus;
     td::String _finalXPreview;
+    td::String _dtwinStatusText;
+    td::String _dtwinDifferenceText;
 
     std::size_t _visiblePointCount = 0;
     std::size_t _variables = 0;
@@ -41,6 +44,25 @@ private:
     double _yMaximum = 1.0;
     bool _converged = false;
     bool _hasData = false;
+    natid_qp::MatchLevel _matchLevel = natid_qp::MatchLevel::NotCompared;
+
+    [[nodiscard]] td::ColorID comparisonColor() const
+    {
+        switch (_matchLevel)
+        {
+            case natid_qp::MatchLevel::ExactMatch:
+                return td::ColorID::Green;
+            case natid_qp::MatchLevel::CloseMatch:
+                return td::ColorID::DodgerBlue;
+            case natid_qp::MatchLevel::PartialMatch:
+                return td::ColorID::DarkOrange;
+            case natid_qp::MatchLevel::Mismatch:
+                return td::ColorID::Crimson;
+            case natid_qp::MatchLevel::NotCompared:
+                return td::ColorID::Gray;
+        }
+        return td::ColorID::Gray;
+    }
 
     static double toLogValue(const double value)
     {
@@ -178,7 +200,7 @@ private:
     {
         constexpr gui::CoordType leftMargin = 78.0;
         constexpr gui::CoordType rightMargin = 24.0;
-        constexpr gui::CoordType topMargin = 142.0;
+        constexpr gui::CoordType topMargin = 184.0;
         constexpr gui::CoordType bottomMargin = 58.0;
 
         const gui::Rect plot(
@@ -384,7 +406,7 @@ protected:
         const gui::Rect bounds(0.0, 0.0, size.width, size.height);
 
         gui::Shape::drawRect(bounds, td::ColorID::SysCtrlBack);
-        const gui::Rect header(bounds.left, bounds.top, bounds.right, bounds.top + 116.0);
+        const gui::Rect header(bounds.left, bounds.top, bounds.right, bounds.top + 158.0);
         gui::Shape::drawRect(header, td::ColorID::SysBackAlt2);
 
         const td::String title("NatIDQP convergence dashboard");
@@ -421,6 +443,23 @@ protected:
             _converged ? td::ColorID::SysText : td::ColorID::Crimson
         );
 
+        gui::Shape::drawRect(
+            gui::Rect(23.0, 121.0, 31.0, 129.0),
+            comparisonColor()
+        );
+        drawText(
+            _dtwinStatusText,
+            gui::Rect(39.0, 112.0, bounds.right - 20.0, 139.0),
+            gui::Font::ID::SystemSmaller,
+            comparisonColor()
+        );
+        drawText(
+            _dtwinDifferenceText,
+            gui::Rect(22.0, 135.0, bounds.right - 20.0, 157.0),
+            gui::Font::ID::SystemSmallest,
+            td::ColorID::SysText
+        );
+
         if (_hasData)
         {
             drawChart(bounds);
@@ -430,7 +469,7 @@ protected:
             const td::String noData("No solver history is available.");
             drawText(
                 noData,
-                gui::Rect(20.0, 135.0, bounds.right - 20.0, bounds.bottom - 20.0),
+                gui::Rect(20.0, 170.0, bounds.right - 20.0, bounds.bottom - 20.0),
                 gui::Font::ID::SystemNormal,
                 td::ColorID::SysText,
                 td::TextAlignment::Center,
@@ -446,11 +485,15 @@ public:
         _summary = "Solver has not been run.";
         _details = "Choose a demo problem or a QP folder.";
         _message = "";
+        _dtwinStatusText = "dTwin: not compared";
+        _dtwinDifferenceText = "";
     }
 
     void setSolution(
         const natid_qp::QPProblem& problem,
         const natid_qp::Solution& solution,
+        const natid_qp::DTwinReferenceResult& dtwinResult,
+        const natid_qp::SolutionComparison& comparison,
         const char* problemName,
         const double tolerance
     )
@@ -497,6 +540,51 @@ public:
 
         _finalStatus = natid_qp::toString(solution.status);
         _finalXPreview = xPreview.str().c_str();
+        _matchLevel = comparison.level;
+
+        std::ostringstream dtwinStatus;
+        dtwinStatus << "dTwin: " << natid_qp::toString(comparison.level);
+        if (dtwinResult.solved())
+        {
+            dtwinStatus << " | objective: " << std::setprecision(12)
+                        << dtwinResult.objective
+                        << " | KKT: " << std::scientific
+                        << std::setprecision(3) << dtwinResult.kktResidual
+                        << " | start: "
+                        << (dtwinResult.usedWarmStart ? "NatIDQP warm" : "neutral");
+        }
+        else if (!dtwinResult.message.empty())
+        {
+            dtwinStatus << " | " << dtwinResult.message;
+        }
+        _dtwinStatusText = dtwinStatus.str().c_str();
+
+        std::ostringstream dtwinDifference;
+        if (dtwinResult.solved())
+        {
+            dtwinDifference << std::scientific << std::setprecision(3)
+                            << "max|dx|=" << comparison.maxAbsoluteXDifference
+                            << " | rel x=" << comparison.relativeXDifference
+                            << " | |dObj|="
+                            << comparison.absoluteObjectiveDifference
+                            << " | x(dTwin)=[";
+            const std::size_t previewCount =
+                std::min<std::size_t>(dtwinResult.x.size(), 4);
+            for (std::size_t index = 0; index < previewCount; ++index)
+            {
+                if (index > 0)
+                    dtwinDifference << ", ";
+                dtwinDifference << dtwinResult.x[index];
+            }
+            if (dtwinResult.x.size() > previewCount)
+                dtwinDifference << ", ...";
+            dtwinDifference << "] | " << comparison.message;
+        }
+        else
+        {
+            dtwinDifference << comparison.message;
+        }
+        _dtwinDifferenceText = dtwinDifference.str().c_str();
 
         updateYRange();
         updatePlaybackText();
@@ -558,6 +646,9 @@ public:
         _summary = "Solver error";
         _details = "The selected QP input could not be loaded or solved.";
         _message = message;
+        _matchLevel = natid_qp::MatchLevel::NotCompared;
+        _dtwinStatusText = "dTwin: not compared";
+        _dtwinDifferenceText = "Primary solver error.";
         reDraw();
     }
 };

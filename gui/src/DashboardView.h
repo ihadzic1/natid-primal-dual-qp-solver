@@ -3,6 +3,7 @@
 #include "ConvergenceCanvas.h"
 
 #include "natid_qp/InteriorPointSolver.h"
+#include "natid_qp/DTwinReferenceSolver.h"
 #include "natid_qp/MatrixMarket.h"
 #include "natid_qp/QPProblem.h"
 
@@ -170,9 +171,60 @@ private:
             const natid_qp::Solution solution =
                 natid_qp::InteriorPointSolver(options).solve(problem);
 
+            natid_qp::DTwinReferenceResult dtwinResult;
+            natid_qp::SolutionComparison comparison;
+            if (solution.converged())
+            {
+                try
+                {
+                    natid_qp::DTwinReferenceOptions dtwinOptions;
+                    dtwinOptions.tolerance = options.tolerance;
+                    dtwinOptions.maxIterations = 200;
+                    dtwinOptions.retryWithNatIDWarmStart = true;
+                    dtwinResult = natid_qp::solveWithDTwin(
+                        problem,
+                        solution,
+                        dtwinOptions
+                    );
+                    comparison = natid_qp::compareWithDTwin(
+                        solution,
+                        dtwinResult,
+                        options.tolerance
+                    );
+                }
+                catch (const std::exception& error)
+                {
+                    dtwinResult.status = natid_qp::DTwinStatus::SolverFailure;
+                    dtwinResult.message = std::string("dTwin exception: ")
+                        + error.what();
+                    comparison = natid_qp::compareWithDTwin(
+                        solution,
+                        dtwinResult,
+                        options.tolerance
+                    );
+                }
+                catch (...)
+                {
+                    dtwinResult.status = natid_qp::DTwinStatus::SolverFailure;
+                    dtwinResult.message = "Unknown dTwin reference-solver error.";
+                    comparison = natid_qp::compareWithDTwin(
+                        solution,
+                        dtwinResult,
+                        options.tolerance
+                    );
+                }
+            }
+            else
+            {
+                comparison.message =
+                    "NatIDQP did not converge, so dTwin was not run.";
+            }
+
             _chart.setSolution(
                 problem,
                 solution,
+                dtwinResult,
+                comparison,
                 problemName.c_str(),
                 options.tolerance
             );

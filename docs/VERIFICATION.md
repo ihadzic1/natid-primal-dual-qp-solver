@@ -41,6 +41,14 @@ Verification date: 2026-07-27
    - Matrix Market `x`, `y`, `s`, and `z` output;
    - built-in and directory-based problem loading.
 
+7. dTwin integration checks:
+   - generated NLE contains all KKT variable groups and complementarity
+     equations;
+   - exact, close, partial, mismatch, and unavailable classifications are
+     covered by automated tests;
+   - the native adapter and GUI compile in syntax-only mode against the actual
+     `sc::IModel`, GUI, and matrix headers from the supplied natID SDK.
+
 ## Platform boundary
 
 The supplied SDK package contains Windows `.dll` and `.lib` files. The current
@@ -48,6 +56,10 @@ verification runtime is Linux, so it cannot perform the final Windows link or
 execute the proprietary natID binary implementation. API compatibility was
 instead checked directly against the supplied production headers, while
 algorithm execution used the isolated test backend.
+
+The same boundary applies to the dTwin/modelSolver runtime. A final native
+link and runtime comparison must be performed on a machine with the matching
+natID `modSolver` and `symbSolvers` binaries.
 
 The final Windows build should be run with the supplied SDK as described in
 `README.md`.

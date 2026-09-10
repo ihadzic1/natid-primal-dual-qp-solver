@@ -61,6 +61,25 @@ It deliberately does not compute an eigenvalue decomposition to prove
 \(Q\succeq0\). Convexity is an input contract. A numerical factorization
 failure is returned as `numerical_failure`.
 
+### dTwin reference adapter
+
+`DTwinReferenceSolver.cpp` uses the native dTwin/modelSolver C++ interface
+from `sc/IModel.h`. The adapter serializes the loaded QP into an in-memory NLE
+model containing stationarity, equality feasibility, inequality feasibility,
+and smoothed Fischer-Burmeister complementarity equations. The model is passed
+directly to `initFromString()`.
+
+The reference solve starts from zero primal/equality-dual values and positive
+slack/inequality-dual values. If dTwin does not converge from that neutral
+point, it may retry from the converged NatIDQP KKT point. The dashboard reports
+which start was used so a warm-start verification is not mistaken for an
+independent benchmark.
+
+`DTwinReferenceCommon.cpp` is kept in the portable core so generation,
+residual evaluation, and comparison classification can be tested without the
+platform dTwin binary. Only the small native adapter is built into the
+`natid_qp_dtwin` target.
+
 ## Portable test backend
 
 The supplied natID archive contains Windows binaries, while automated
