@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ConvergenceCanvas.h"
-#include "ObjectiveCanvas.h"
+#include "ObjectiveChartPanel.h"
 
 #include "natid_qp/InteriorPointSolver.h"
 #include "natid_qp/DTwinReferenceSolver.h"
@@ -81,7 +81,7 @@ private:
     gui::NumericEdit _toleranceEdit;
     gui::Button _runAgainButton;
     gui::HorizontalLayout _setupLayout;
-    ObjectiveCanvas _objectiveChart;
+    ObjectiveChartPanel _objectiveChart;
     ConvergenceCanvas _residualsChart;
     gui::StandardTabView _charts;
     gui::Label _animationLabel;

@@ -21,6 +21,7 @@ set(NATID_QP_GUI_HEADERS
     src/ConvergenceCanvas.h
     src/DashboardView.h
     src/MainWindow.h
+    src/ObjectiveChartPanel.h
     src/ObjectiveCanvas.h
 )
 
