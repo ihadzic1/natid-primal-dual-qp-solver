@@ -1,4 +1,4 @@
-name: Build NatIDQP Installers
+name: Build natidqp solver installers
 
 on:
   push:
@@ -17,68 +17,106 @@ on:
 permissions:
   contents: write
 
+env:
+  NATID_SDK_TAG: v4.2.1
+  NATID_SDK_BUILD: "20260710"
+
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Install natID SDK and utilities
+      - name: Install matching natID SDK source and binaries
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/idzafic/natID.git "$env:USERPROFILE\natID"
-          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.SDK" -Target "$env:USERPROFILE\natID\natID.SDK" | Out-Null
-          New-Item -ItemType Junction -Path "$env:USERPROFILE\natID.Utils" -Target "$env:USERPROFILE\natID\natID.Utils" | Out-Null
+          $sdkRepository = "$env:USERPROFILE\natID"
+          git clone --depth 1 --branch $env:NATID_SDK_TAG `
+            https://github.com/idzafic/natID.git $sdkRepository
+          if ($LASTEXITCODE -ne 0) { throw "Could not clone natID $env:NATID_SDK_TAG." }
 
-          $archive = "$env:TEMP\natid-sdk-bin.7z"
-          curl.exe -L -o $archive https://github.com/idzafic/natID/releases/download/v4.2.1/bin_win_x64_20260710.7z
+          New-Item -ItemType Junction `
+            -Path "$env:USERPROFILE\natID.SDK" `
+            -Target "$sdkRepository\natID.SDK" | Out-Null
+          New-Item -ItemType Junction `
+            -Path "$env:USERPROFILE\natID.Utils" `
+            -Target "$sdkRepository\natID.Utils" | Out-Null
+
+          $archive = "$env:TEMP\natid-sdk-win-x64.7z"
+          $url = "https://github.com/idzafic/natID/releases/download/$env:NATID_SDK_TAG/bin_win_x64_$env:NATID_SDK_BUILD.7z"
+          curl.exe --fail --location --retry 3 --output $archive $url
+          if ($LASTEXITCODE -ne 0) { throw "Could not download $url." }
+
           $sevenZip = "$env:ProgramFiles\7-Zip\7z.exe"
-          if (-not (Test-Path $sevenZip)) {
+          if (-not (Test-Path -LiteralPath $sevenZip)) {
             choco install 7zip -y --no-progress
+            if ($LASTEXITCODE -ne 0) { throw "Could not install 7-Zip." }
           }
           & $sevenZip x -y "-o$env:USERPROFILE\natID.SDK\bin" $archive
-          if ($LASTEXITCODE -ne 0) { throw "Could not extract natID SDK binaries." }
+          if ($LASTEXITCODE -ne 0) { throw "Could not extract the natID SDK binaries." }
+
+          if (-not (Test-Path -LiteralPath "$env:USERPROFILE\natID.SDK\DevEnv\Common.cmake")) {
+            throw "The natID SDK source layout is incomplete."
+          }
+          if (-not (Test-Path -LiteralPath "$env:USERPROFILE\natID.SDK\bin\mainUtils.dll")) {
+            throw "The natID Windows binary package is incomplete."
+          }
 
       - name: Configure, build and test Release
         shell: pwsh
         run: |
-          $env:HOME = $env:USERPROFILE
           $ramDiskBacking = "$env:USERPROFILE\natID.RAMDisk"
           New-Item -ItemType Directory -Force -Path $ramDiskBacking | Out-Null
           if (-not (Get-PSDrive -Name R -ErrorAction SilentlyContinue)) {
-            cmd /c "subst R: `"$ramDiskBacking`""
+            & subst.exe R: $ramDiskBacking
+            if ($LASTEXITCODE -ne 0) { throw "Could not map the natID RAMDisk path." }
           }
 
           New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Desktop" | Out-Null
-          $collectorSource = "$env:USERPROFILE\Desktop\NatIDQP-Packaging-Source"
-          New-Item -ItemType Junction -Path $collectorSource -Target $env:GITHUB_WORKSPACE | Out-Null
+          $collectorSource = "$env:USERPROFILE\Desktop\natidqp-solver-source"
+          New-Item -ItemType Junction `
+            -Path $collectorSource `
+            -Target $env:GITHUB_WORKSPACE | Out-Null
 
-          cmake -S $collectorSource -B R:\Out -A x64 "-DNATID_SDK_ROOT=$env:USERPROFILE\natID.SDK" "-DBUILD_TESTING=ON"
+          cmake -S $collectorSource -B R:\build `
+            -G "Visual Studio 17 2022" -A x64 `
+            "-DNATID_SDK_ROOT=$env:USERPROFILE\natID.SDK" `
+            "-DBUILD_TESTING=ON"
           if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
-          cmake --build R:\Out --config Release --target natid_qp_gui natid_qp_tests
+
+          cmake --build R:\build --config Release `
+            --target natid_qp natid_qp_gui natid_qp_tests
           if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
 
           $env:PATH = "$env:USERPROFILE\natID.SDK\bin;$env:USERPROFILE\natID.SDK\bin\GTK;$env:PATH"
-          ctest --test-dir R:\Out -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { throw "NatIDQP tests failed." }
-          if (-not (Test-Path "R:\Out\NatIDQP\Release\natid_qp_gui.exe")) {
-            throw "The Windows GUI executable was not produced."
+          ctest --test-dir R:\build -C Release --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw "natidqp solver tests failed." }
+
+          $guiExecutable = "R:\Out\NatIDQP\Release\natid_qp_gui.exe"
+          if (-not (Test-Path -LiteralPath $guiExecutable)) {
+            Get-ChildItem R:\Out -Recurse -ErrorAction SilentlyContinue
+            throw "Expected GUI executable was not produced at $guiExecutable."
           }
 
       - name: Collect Windows installer
         shell: pwsh
         run: |
-          $env:HOME = $env:USERPROFILE
-          $setups = "$env:USERPROFILE\NatIDQP.Setups"
+          $sdkRoot = "$env:USERPROFILE\natID.SDK"
+          $setups = "$env:USERPROFILE\natidqp.Setups"
           New-Item -ItemType Directory -Force -Path $setups | Out-Null
-          Copy-Item "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\*" $setups -Recurse -Force
+          Copy-Item "$sdkRoot\DevEnv\SetupCollectors\*" $setups -Recurse -Force
           Copy-Item "packaging\NatIDQP.xml" "$setups\NatIDQP.xml" -Force
-          Copy-Item "packaging\modSolver.xml" "$setups\Packages\modSolver.xml" -Force
-          Copy-Item "packaging\GTK4.xml" "$env:USERPROFILE\natID.SDK\DevEnv\SetupCollectors\Packages\GTK4.xml" -Force
 
-          & "$env:USERPROFILE\natID.Utils\windows\SetupCollector.exe" "$setups\NatIDQP.xml"
+          foreach ($package in @("modSolver.xml", "GTK4.xml")) {
+            Copy-Item "packaging\$package" "$setups\Packages\$package" -Force
+            Copy-Item "packaging\$package" `
+              "$sdkRoot\DevEnv\SetupCollectors\Packages\$package" -Force
+          }
+
+          & "$env:USERPROFILE\natID.Utils\windows\SetupCollector.exe" `
+            "$setups\NatIDQP.xml"
           if ($LASTEXITCODE -ne 0) { throw "natID SetupCollector failed." }
 
       - name: Stage Windows installer
@@ -88,34 +126,29 @@ jobs:
           New-Item -ItemType Directory -Force -Path $output | Out-Null
           Get-ChildItem R:\Setup -File -Recurse |
             Where-Object { $_.Extension -eq ".msi" -or $_.Name -like "Install*.exe" } |
-            Copy-Item -Destination $output
+            Copy-Item -Destination $output -Force
 
-          $msi = @(Get-ChildItem $output -File -Filter *.msi)
-          if ($msi.Count -eq 0) { throw "No MSI was produced by SetupCollector." }
-          $bootstrapper = @(Get-ChildItem $output -File -Filter "Install*.exe")
-          $msiPaths = @($msi | ForEach-Object { $_.FullName })
-
+          $msiFiles = @(Get-ChildItem $output -File -Filter *.msi)
+          if ($msiFiles.Count -eq 0) { throw "No MSI was produced by SetupCollector." }
+          $bootstrapperFiles = @(Get-ChildItem $output -File -Filter "Install*.exe")
+          $msiPaths = @($msiFiles | ForEach-Object FullName)
           try {
-            if ($bootstrapper.Count -eq 0) {
-              throw "The optional installer bootstrapper EXE is unavailable."
-            }
             $archiveInputs = @($msiPaths)
-            $archiveInputs += @($bootstrapper | ForEach-Object { $_.FullName })
-            Compress-Archive -Path $archiveInputs -DestinationPath "NatIDQP-Windows.zip" -Force
+            $archiveInputs += @($bootstrapperFiles | ForEach-Object FullName)
+            Compress-Archive -Path $archiveInputs `
+              -DestinationPath "natidqp-solver-Windows.zip" -Force
           }
           catch {
-            Write-Warning "The unsigned bootstrapper was blocked; packaging the MSI only."
-            if (Test-Path "NatIDQP-Windows.zip") {
-              Remove-Item "NatIDQP-Windows.zip" -Force
-            }
-            Compress-Archive -Path $msiPaths -DestinationPath "NatIDQP-Windows.zip" -Force
+            Write-Warning "The unsigned bootstrapper could not be archived; publishing the MSI only."
+            Compress-Archive -Path $msiPaths `
+              -DestinationPath "natidqp-solver-Windows.zip" -Force
           }
 
-      - name: Upload Windows artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
         with:
-          name: NatIDQP-Windows
-          path: NatIDQP-Windows.zip
+          name: natidqp-solver-Windows
+          path: natidqp-solver-Windows.zip
           if-no-files-found: error
 
   macos:
@@ -123,7 +156,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
+          - runner: macos-15
             sdk_arch: arm64
             collector_arch: arm64
             label: Silicon
@@ -136,50 +169,58 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
-      - name: Install natID SDK and utilities
+      - name: Install matching natID SDK source and binaries
         run: |
-          git clone --depth 1 https://github.com/idzafic/natID.git "$HOME/natID"
+          set -euo pipefail
+          git clone --depth 1 --branch "$NATID_SDK_TAG" \
+            https://github.com/idzafic/natID.git "$HOME/natID"
           ln -s "$HOME/natID/natID.SDK" "$HOME/natID.SDK"
           ln -s "$HOME/natID/natID.Utils" "$HOME/natID.Utils"
-          brew install sevenzip
-          curl -L -o /tmp/natid-sdk-bin.7z \
-            "https://github.com/idzafic/natID/releases/download/v4.2.1/bin_macOS_${{ matrix.sdk_arch }}_20260710.7z"
-          7zz x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk-bin.7z
-
-      - name: Place project for SetupCollector
-        run: |
-          mkdir -p "$HOME/Desktop"
-          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/NatIDQP-Packaging-Source"
+          brew list sevenzip >/dev/null 2>&1 || brew install sevenzip
+          url="https://github.com/idzafic/natID/releases/download/$NATID_SDK_TAG/bin_macOS_${{ matrix.sdk_arch }}_${NATID_SDK_BUILD}.7z"
+          curl --fail --location --retry 3 --output /tmp/natid-sdk.7z "$url"
+          7zz x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk.7z
+          test -f "$HOME/natID.SDK/DevEnv/Common.cmake"
+          test -d "$HOME/natID.SDK/bin/lib"
 
       - name: Configure, build and test Release
         run: |
-          cmake -S "$HOME/Desktop/NatIDQP-Packaging-Source" \
+          set -euo pipefail
+          mkdir -p "$HOME/Desktop"
+          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/natidqp-solver-source"
+          cmake -S "$HOME/Desktop/natidqp-solver-source" \
             -B "$HOME/natID.RAMDisk/build" \
             -DCMAKE_BUILD_TYPE=Release \
             -DNATID_SDK_ROOT="$HOME/natID.SDK" \
             -DBUILD_TESTING=ON
           cmake --build "$HOME/natID.RAMDisk/build" \
-            --target natid_qp_gui natid_qp_tests \
+            --target natid_qp natid_qp_gui natid_qp_tests \
             -j"$(sysctl -n hw.logicalcpu)"
-          export DYLD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:$DYLD_LIBRARY_PATH"
+          export DYLD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:${DYLD_LIBRARY_PATH:-}"
           ctest --test-dir "$HOME/natID.RAMDisk/build" --output-on-failure
           test -f "$HOME/natID.RAMDisk/Out/NatIDQP/Release/natid_qp_gui.app/Contents/MacOS/natid_qp_gui"
+          test -f "$HOME/natID.RAMDisk/Out/NatIDQP/Release/natid_qp_gui.app/Contents/Resources/macApp.icns"
 
-      - name: Collect macOS app
+      - name: Collect macOS application
         run: |
+          set -euo pipefail
+          sudo rm -rf /Volumes/RAMDisk
           sudo ln -s "$HOME/natID.RAMDisk" /Volumes/RAMDisk
-          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
-          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/natidqp.Setups"
+          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/natidqp.Setups/"
           cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
-            "$HOME/NatIDQP.Setups/Packages/modSolver.xml"
+            "$HOME/natidqp.Setups/Packages/modSolver.xml"
+          cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
+            "$HOME/natID.SDK/DevEnv/SetupCollectors/Packages/modSolver.xml"
           chmod +x "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector"
           "$HOME/natID.Utils/macOS/${{ matrix.collector_arch }}/SetupCollector" \
-            "$HOME/NatIDQP.Setups/NatIDQP.xml"
+            "$HOME/natidqp.Setups/NatIDQP.xml"
 
-      - name: Stage, sign and archive macOS app
+      - name: Sign and archive macOS application
         run: |
+          set -euo pipefail
           output="$GITHUB_WORKSPACE/installer-output"
           mkdir -p "$output"
           bundle="$(find "$HOME/natID.RAMDisk/Setup" -type d -name "*.app" -print -quit)"
@@ -189,19 +230,20 @@ jobs:
           fi
           cp -R "$bundle" "$output/"
           app="$output/$(basename "$bundle")"
+          test -f "$app/Contents/Resources/macApp.icns"
           codesign --force --deep --sign - "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           xattr -cr "$app"
           cd "$output"
           ditto -c -k --keepParent --sequesterRsrc \
             "$(basename "$app")" \
-            "NatIDQP-macOS-${{ matrix.label }}.zip"
+            "natidqp-solver-macOS-${{ matrix.label }}.zip"
 
-      - name: Upload macOS artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
         with:
-          name: NatIDQP-macOS-${{ matrix.label }}
-          path: installer-output/NatIDQP-macOS-${{ matrix.label }}.zip
+          name: natidqp-solver-macOS-${{ matrix.label }}
+          path: installer-output/natidqp-solver-macOS-${{ matrix.label }}.zip
           if-no-files-found: error
 
   linux:
@@ -209,85 +251,111 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Install build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake git p7zip-full zip \
+          sudo apt-get install -y \
+            build-essential cmake git p7zip-full zip \
             libgtk-4-dev libadwaita-1-dev
 
-      - name: Install natID SDK and utilities
+      - name: Install matching natID SDK source and binaries
         run: |
-          git clone --depth 1 https://github.com/idzafic/natID.git "$HOME/natID"
+          set -euo pipefail
+          git clone --depth 1 --branch "$NATID_SDK_TAG" \
+            https://github.com/idzafic/natID.git "$HOME/natID"
           ln -s "$HOME/natID/natID.SDK" "$HOME/natID.SDK"
           ln -s "$HOME/natID/natID.Utils" "$HOME/natID.Utils"
-          curl -L -o /tmp/natid-sdk-bin.7z \
-            https://github.com/idzafic/natID/releases/download/v4.2.1/bin_linux_x64_20260710.7z
-          7z x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk-bin.7z
-
-      - name: Place project for SetupCollector
-        run: |
-          mkdir -p "$HOME/Desktop"
-          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/NatIDQP-Packaging-Source"
+          url="https://github.com/idzafic/natID/releases/download/$NATID_SDK_TAG/bin_linux_x64_${NATID_SDK_BUILD}.7z"
+          curl --fail --location --retry 3 --output /tmp/natid-sdk.7z "$url"
+          7z x -y -o"$HOME/natID.SDK/bin" /tmp/natid-sdk.7z
+          test -f "$HOME/natID.SDK/DevEnv/Common.cmake"
+          test -d "$HOME/natID.SDK/bin/lib"
 
       - name: Configure, build and test Release
         run: |
-          cmake -S "$HOME/Desktop/NatIDQP-Packaging-Source" \
+          set -euo pipefail
+          mkdir -p "$HOME/Desktop"
+          ln -s "$GITHUB_WORKSPACE" "$HOME/Desktop/natidqp-solver-source"
+          cmake -S "$HOME/Desktop/natidqp-solver-source" \
             -B "$HOME/natID.RAMDisk/build" \
             -DCMAKE_BUILD_TYPE=Release \
             -DNATID_SDK_ROOT="$HOME/natID.SDK" \
             -DBUILD_TESTING=ON
           cmake --build "$HOME/natID.RAMDisk/build" \
-            --target natid_qp_gui natid_qp_tests \
+            --target natid_qp natid_qp_gui natid_qp_tests \
             -j"$(nproc)"
-          export LD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$HOME/natID.SDK/bin/lib:${LD_LIBRARY_PATH:-}"
           ctest --test-dir "$HOME/natID.RAMDisk/build" --output-on-failure
           test -f "$HOME/natID.RAMDisk/Out/NatIDQP/Release/natid_qp_gui"
 
       - name: Collect Linux package
         run: |
-          # SetupCollector writes DevRes displayName directly into Debian's
-          # Package field. Keep the human-readable name for Windows/macOS,
-          # but provide a Debian-safe Linux override (lowercase, no spaces).
-          python3 - <<'PY'
-          import os
-          import xml.etree.ElementTree as ET
-          from pathlib import Path
-
-          devres = Path(os.environ["GITHUB_WORKSPACE"]) / "gui" / "res" / "DevRes.xml"
-          ET.register_namespace("lin", "linux")
-          tree = ET.parse(devres)
-          tree.getroot().set("{linux}displayName", "natid-qp-solver")
-          tree.write(devres, encoding="utf-8", xml_declaration=True)
-          PY
-
+          set -euo pipefail
           sudo mkdir -p /media
+          sudo rm -rf /media/RAMDisk
           sudo ln -s "$HOME/natID.RAMDisk" /media/RAMDisk
-          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/NatIDQP.Setups"
-          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/NatIDQP.Setups/"
+          cp -R "$HOME/natID.SDK/DevEnv/SetupCollectors" "$HOME/natidqp.Setups"
+          cp "$GITHUB_WORKSPACE/packaging/NatIDQP.xml" "$HOME/natidqp.Setups/"
           cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
-            "$HOME/NatIDQP.Setups/Packages/modSolver.xml"
+            "$HOME/natidqp.Setups/Packages/modSolver.xml"
+          cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
+            "$HOME/natID.SDK/DevEnv/SetupCollectors/Packages/modSolver.xml"
           chmod +x "$HOME/natID.Utils/linux/SetupCollector"
-          "$HOME/natID.Utils/linux/SetupCollector" "$HOME/NatIDQP.Setups/NatIDQP.xml"
+          "$HOME/natID.Utils/linux/SetupCollector" \
+            "$HOME/natidqp.Setups/NatIDQP.xml"
 
-      - name: Stage and archive Linux package
+      - name: Embed and validate Linux application icons
         run: |
+          set -euo pipefail
+          deb="$(find "$HOME/natID.RAMDisk/Setup" -type f -name "*.deb" -print -quit)"
+          if [ -z "$deb" ]; then
+            echo "No Linux DEB package was produced by SetupCollector." >&2
+            exit 1
+          fi
+
+          patch_root=/tmp/natidqp-deb-patch
+          rm -rf "$patch_root"
+          mkdir -p "$patch_root"
+          dpkg-deb -R "$deb" "$patch_root/package"
+          icon_source="$GITHUB_WORKSPACE/gui/res/appIcon"
+          for size in 16 32 48 128 256; do
+            icon_dir="$patch_root/package/usr/share/icons/hicolor/${size}x${size}/apps"
+            mkdir -p "$icon_dir"
+            cp "$icon_source/lnxApp${size}.png" "$icon_dir/natid_qp_gui.png"
+          done
+          while IFS= read -r desktop_file; do
+            sed -i 's/^Icon=.*/Icon=natid_qp_gui/' "$desktop_file"
+          done < <(find "$patch_root/package/usr/share/applications" -type f -name "*.desktop" 2>/dev/null)
+
+          dpkg-deb -b "$patch_root/package" "$patch_root/patched.deb"
+          mv "$patch_root/patched.deb" "$deb"
+          package_name="$(dpkg-deb -f "$deb" Package)"
+          case "$package_name" in
+            *[!a-z0-9+.-]*)
+              echo "Invalid Debian package name: $package_name" >&2
+              exit 1
+              ;;
+          esac
+          dpkg-deb -c "$deb" | grep '/icons/hicolor/.*/apps/natid_qp_gui.png'
+          dpkg-deb -f "$deb" Package Version Maintainer
+
+      - name: Archive Linux package
+        run: |
+          set -euo pipefail
           output="$GITHUB_WORKSPACE/installer-output"
           mkdir -p "$output"
           find "$HOME/natID.RAMDisk/Setup" -type f -name "*.deb" \
             -exec cp {} "$output/" \;
-          if ! find "$output" -maxdepth 1 -type f -name "*.deb" | grep -q .; then
-            echo "No Linux deb package was produced by SetupCollector." >&2
-            exit 1
-          fi
-          zip -j "$GITHUB_WORKSPACE/NatIDQP-Linux.zip" "$output"/*.deb
+          test -n "$(find "$output" -maxdepth 1 -type f -name "*.deb" -print -quit)"
+          zip -j "$GITHUB_WORKSPACE/natidqp-solver-Linux.zip" "$output"/*.deb
 
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload Linux installer
+        uses: actions/upload-artifact@v4
         with:
-          name: NatIDQP-Linux
-          path: NatIDQP-Linux.zip
+          name: natidqp-solver-Linux
+          path: natidqp-solver-Linux.zip
           if-no-files-found: error
 
   release:
@@ -300,39 +368,52 @@ jobs:
     steps:
       - name: Determine release tag
         id: tag
+        shell: bash
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "push" ]; then
-            echo "name=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            tag="$GITHUB_REF_NAME"
           else
-            if [ -z "${{ github.event.inputs.release_tag }}" ]; then
-              echo "release_tag is required when publish_release=yes" >&2
-              exit 1
-            fi
-            echo "name=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+            tag="${{ github.event.inputs.release_tag }}"
           fi
+          if [ -z "$tag" ]; then
+            echo "release_tag is required when publish_release=yes." >&2
+            exit 1
+          fi
+          echo "name=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Download all installer artifacts
-        uses: actions/download-artifact@v8
+      - name: Download installer artifacts
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Validate release files
+        run: |
+          set -euo pipefail
+          test -f artifacts/natidqp-solver-Windows/natidqp-solver-Windows.zip
+          test -f artifacts/natidqp-solver-macOS-Silicon/natidqp-solver-macOS-Silicon.zip
+          test -f artifacts/natidqp-solver-macOS-Intel/natidqp-solver-macOS-Intel.zip
+          test -f artifacts/natidqp-solver-Linux/natidqp-solver-Linux.zip
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
-          name: NatIDQP ${{ steps.tag.outputs.name }}
+          name: natidqp solver ${{ steps.tag.outputs.name }}
           body: |
-            ## NatIDQP installers
+            ## natidqp solver installers
 
-            - Windows: NatIDQP-Windows.zip
-            - macOS Apple Silicon: NatIDQP-macOS-Silicon.zip
-            - macOS Intel: NatIDQP-macOS-Intel.zip
-            - Linux Ubuntu 24.04+: NatIDQP-Linux.zip
+            - Windows: `natidqp-solver-Windows.zip`
+            - macOS Apple Silicon: `natidqp-solver-macOS-Silicon.zip`
+            - macOS Intel: `natidqp-solver-macOS-Intel.zip`
+            - Linux Ubuntu 24.04+: `natidqp-solver-Linux.zip`
+
+            Author: Irfan Hadzic
 
             The macOS bundles are ad-hoc signed but not Apple-notarized.
-            The Linux package is not repository-signed.
+            The Linux DEB is not repository-signed.
           files: |
-            artifacts/NatIDQP-Windows/*
-            artifacts/NatIDQP-macOS-Silicon/*
-            artifacts/NatIDQP-macOS-Intel/*
-            artifacts/NatIDQP-Linux/*
+            artifacts/natidqp-solver-Windows/natidqp-solver-Windows.zip
+            artifacts/natidqp-solver-macOS-Silicon/natidqp-solver-macOS-Silicon.zip
+            artifacts/natidqp-solver-macOS-Intel/natidqp-solver-macOS-Intel.zip
+            artifacts/natidqp-solver-Linux/natidqp-solver-Linux.zip

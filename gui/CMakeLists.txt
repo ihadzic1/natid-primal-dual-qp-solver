@@ -21,15 +21,23 @@ set(NATID_QP_GUI_HEADERS
     src/ConvergenceCanvas.h
     src/DashboardView.h
     src/MainWindow.h
+    src/ObjectiveChartPanel.h
     src/ObjectiveCanvas.h
 )
 
 set(NATID_QP_GUI_PLIST "${CMAKE_CURRENT_LIST_DIR}/src/Info.plist")
 
+if(WIN32)
+    set(NATID_QP_GUI_ICON_SOURCE
+        "${CMAKE_CURRENT_LIST_DIR}/res/appIcon/winAppIcon.rc"
+    )
+endif()
+
 add_executable(
     natid_qp_gui
     ${NATID_QP_GUI_SOURCES}
     ${NATID_QP_GUI_HEADERS}
+    ${NATID_QP_GUI_ICON_SOURCE}
 )
 
 target_link_libraries(
@@ -52,7 +60,20 @@ source_group("src" FILES ${NATID_QP_GUI_SOURCES})
 source_group("inc" FILES ${NATID_QP_GUI_HEADERS})
 
 setTargetPropertiesForGUIApp(natid_qp_gui "${NATID_QP_GUI_PLIST}")
+setAppIcon(natid_qp_gui "${CMAKE_CURRENT_LIST_DIR}")
 setIDEPropertiesForGUIExecutable(natid_qp_gui "${CMAKE_CURRENT_LIST_DIR}")
+
+if(UNIX AND NOT APPLE)
+    foreach(ICON_SIZE 16 32 48 128 256)
+        install(
+            FILES
+                "${CMAKE_CURRENT_LIST_DIR}/res/appIcon/lnxApp${ICON_SIZE}.png"
+            DESTINATION
+                "share/icons/hicolor/${ICON_SIZE}x${ICON_SIZE}/apps"
+            RENAME natid_qp_gui.png
+        )
+    endforeach()
+endif()
 
 # Common.cmake from some natID SDK packages does not forward the function's
 # devResPath argument into the Visual Studio debugger property. Set it

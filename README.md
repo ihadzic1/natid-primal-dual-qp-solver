@@ -150,6 +150,18 @@ animation. **Play Again** rewinds the existing history to iteration zero and
 does not run the solver again. The **Y-axis mode** selector affects the
 residual chart only.
 
+For two-variable problems, three display checkboxes appear directly below the
+objective plot. **Objective colors** adds a blue-to-orange heatmap of the
+objective landscape (blue is lower, orange is higher), **Background iso-lines**
+shows or hides only the faint gray contours that do not correspond to solver
+iterates, and **Feasible region** controls the translucent green overlay.
+Solver-level iso-lines, the iterate path, constraints, current point, and
+optimum marker remain visible independently of those options. The landscape
+color range adapts to the visible viewport while zooming so small local
+objective differences remain distinguishable. These controls are disabled for
+problems with more than two variables, which continue to use objective value
+versus iteration.
+
 The **QP problem** selector replaces the two separate demo buttons. It contains
 the built-in inequality and equality demos followed by every valid problem
 folder found under `data`, in natural numeric order. Selecting an entry loads
@@ -279,6 +291,14 @@ logarithmic scale.
 
 See [docs/ALGORITHM.md](docs/ALGORITHM.md) for the derivation and direct mapping
 from each mathematical step to the natID implementation.
+
+## Application installers
+
+The desktop product is named **natidqp solver** and uses the project icon on
+Windows, macOS, and Linux. The release workflow builds and tests the program
+against a matching natID SDK release before creating the Windows MSI, macOS
+application bundles, and Linux DEB. See
+[README_INSTALLER.md](README_INSTALLER.md) for local and GitHub Actions usage.
 
 ## References
 

@@ -1,19 +1,24 @@
 param(
     [string]$NatIdSdkRoot = "$env:USERPROFILE\natID.SDK",
-    [string]$NatIdUtilsRoot = "$env:USERPROFILE\natID.Utils"
+    [string]$NatIdUtilsRoot = "$env:USERPROFILE\natID.Utils",
+    [string]$BuildHomeRoot = "$env:USERPROFILE"
 )
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$ramDiskBacking = "$env:USERPROFILE\natID.RAMDisk"
-$buildRoot = "R:\Out"
+$ramDiskBacking = Join-Path $BuildHomeRoot "natID.RAMDisk"
+$buildRoot = "R:\natidqp-build"
 $setupOutputRoot = "R:\Setup"
-$collectorSource = "$env:USERPROFILE\Desktop\NatIDQP-Packaging-Source"
-$collectorConfigs = "$env:USERPROFILE\NatIDQP.Setups"
+$collectorSource = "$env:USERPROFILE\Desktop\natidqp-solver-source"
+$collectorConfigs = "$env:USERPROFILE\natidqp.Setups"
 $gtkPackageFile = Join-Path $NatIdSdkRoot "DevEnv\SetupCollectors\Packages\GTK4.xml"
-$gtkBackupFile = "$env:TEMP\NatIDQP-GTK4-backup.xml"
+$gtkBackupFile = "$env:TEMP\natidqp-GTK4-backup.xml"
+$modSolverPackageFile = Join-Path $NatIdSdkRoot "DevEnv\SetupCollectors\Packages\modSolver.xml"
+$modSolverBackupFile = "$env:TEMP\natidqp-modSolver-backup.xml"
 $createdCollectorJunction = $false
+$createdRamDiskMapping = $false
 $hasGtkBackup = $false
+$hasModSolverBackup = $false
 
 function Assert-LastCommand([string]$message) {
     if ($LASTEXITCODE -ne 0) {
@@ -31,11 +36,11 @@ if (-not (Test-Path "$NatIdUtilsRoot\windows\SetupCollector.exe")) {
     throw "SetupCollector.exe was not found under '$NatIdUtilsRoot'."
 }
 
-$env:HOME = $env:USERPROFILE
 New-Item -ItemType Directory -Force -Path $ramDiskBacking | Out-Null
 if (-not (Get-PSDrive -Name R -ErrorAction SilentlyContinue)) {
-    cmd /c "subst R: `"$ramDiskBacking`""
+    & subst.exe R: $ramDiskBacking
     Assert-LastCommand "Could not create the R: RAMDisk mapping."
+    $createdRamDiskMapping = $true
 }
 
 try {
@@ -51,8 +56,10 @@ try {
         throw "natID GUI resource descriptor was not found at '$devResFile'."
     }
 
-    cmake -S $collectorSource -B $buildRoot -A x64 `
+    cmake -S $collectorSource -B $buildRoot `
+        -G "Visual Studio 17 2022" -A x64 `
         "-DNATID_SDK_ROOT=$NatIdSdkRoot" `
+        "-DNATID_QP_HOME_ROOT=$BuildHomeRoot" `
         "-DBUILD_TESTING=ON"
     Assert-LastCommand "CMake configuration failed."
 
@@ -63,7 +70,7 @@ try {
     ctest --test-dir $buildRoot -C Release --output-on-failure
     Assert-LastCommand "NatIDQP tests failed."
 
-    $guiExecutable = Join-Path $buildRoot "NatIDQP\Release\natid_qp_gui.exe"
+    $guiExecutable = "R:\Out\NatIDQP\Release\natid_qp_gui.exe"
     if (-not (Test-Path $guiExecutable)) {
         throw "Expected GUI executable was not produced at '$guiExecutable'."
     }
@@ -74,16 +81,31 @@ try {
     Copy-Item "$projectRoot\packaging\modSolver.xml" `
         "$collectorConfigs\Packages\modSolver.xml" -Force
 
+    if (Test-Path $modSolverPackageFile) {
+        Copy-Item $modSolverPackageFile $modSolverBackupFile -Force
+        $hasModSolverBackup = $true
+    }
+    Copy-Item "$projectRoot\packaging\modSolver.xml" `
+        $modSolverPackageFile -Force
+
     if (Test-Path $gtkPackageFile) {
         Copy-Item $gtkPackageFile $gtkBackupFile -Force
         $hasGtkBackup = $true
     }
     Copy-Item "$projectRoot\packaging\GTK4.xml" $gtkPackageFile -Force
+    Copy-Item "$projectRoot\packaging\GTK4.xml" `
+        "$collectorConfigs\Packages\GTK4.xml" -Force
 
+    if (Test-Path -LiteralPath $setupOutputRoot) {
+        Remove-Item -LiteralPath $setupOutputRoot -Recurse -Force
+    }
     & "$NatIdUtilsRoot\windows\SetupCollector.exe" "$collectorConfigs\NatIDQP.xml"
     Assert-LastCommand "natID SetupCollector failed."
 
     $dist = Join-Path $projectRoot "installer-output"
+    if (Test-Path -LiteralPath $dist) {
+        Remove-Item -LiteralPath $dist -Recurse -Force
+    }
     New-Item -ItemType Directory -Force -Path $dist | Out-Null
     Get-ChildItem $setupOutputRoot -File -Recurse |
         Where-Object { $_.Extension -eq ".msi" -or $_.Name -like "Install*.exe" } |
@@ -95,7 +117,7 @@ try {
     }
 
     $bootstrapperFiles = @(Get-ChildItem $dist -File -Filter "Install*.exe")
-    $zipFile = Join-Path $projectRoot "NatIDQP-Windows-Installer.zip"
+    $zipFile = Join-Path $projectRoot "natidqp-solver-Windows-Installer.zip"
     $msiPaths = @($msiFiles | ForEach-Object { $_.FullName })
 
     try {
@@ -123,7 +145,16 @@ finally {
     if ($hasGtkBackup) {
         Copy-Item $gtkBackupFile $gtkPackageFile -Force
     }
+    if ($hasModSolverBackup) {
+        Copy-Item $modSolverBackupFile $modSolverPackageFile -Force
+    }
+    elseif (Test-Path $modSolverPackageFile) {
+        Remove-Item -LiteralPath $modSolverPackageFile -Force
+    }
     if ($createdCollectorJunction -and (Test-Path $collectorSource)) {
         cmd /c "rmdir `"$collectorSource`""
+    }
+    if ($createdRamDiskMapping) {
+        & subst.exe R: /D
     }
 }

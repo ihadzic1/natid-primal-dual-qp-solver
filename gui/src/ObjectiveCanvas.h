@@ -68,6 +68,9 @@ private:
     double _zoomLevel = 1.0;
     bool _hasData = false;
     bool _converged = false;
+    bool _showLandscapeColors = true;
+    bool _showBackgroundContours = true;
+    bool _showFeasibleRegion = true;
 
     static void drawText(
         const td::String& text,
@@ -602,7 +605,7 @@ private:
 
     void drawFeasibleRegion(const gui::Rect& plot) const
     {
-        if (_inequalities.empty())
+        if (!_showFeasibleRegion || _inequalities.empty())
             return;
 
         constexpr int columns = 44;
@@ -629,6 +632,93 @@ private:
                     ),
                     0.16f,
                     td::ColorID::LightGreen
+                );
+            }
+        }
+    }
+
+    void drawObjectiveLandscape(const gui::Rect& plot) const
+    {
+        if (!_showLandscapeColors)
+            return;
+
+        constexpr std::array<td::ColorID, 12> palette{
+            td::ColorID::MidnightBlue,
+            td::ColorID::DarkBlue,
+            td::ColorID::Indigo,
+            td::ColorID::BlueViolet,
+            td::ColorID::RoyalBlue,
+            td::ColorID::DodgerBlue,
+            td::ColorID::Turquoise,
+            td::ColorID::SeaGreen,
+            td::ColorID::YellowGreen,
+            td::ColorID::Gold,
+            td::ColorID::DarkOrange,
+            td::ColorID::Vermilion
+        };
+        constexpr int columns = 64;
+        constexpr int rows = 44;
+        const double dataWidth = (_xMaximum - _xMinimum) / columns;
+        const double dataHeight = (_yMaximum - _yMinimum) / rows;
+        double visibleMinimum = std::numeric_limits<double>::infinity();
+        double visibleMaximum = -std::numeric_limits<double>::infinity();
+        for (int row = 0; row < rows; ++row)
+        {
+            for (int column = 0; column < columns; ++column)
+            {
+                const double value = objectiveValue(
+                    _xMinimum + (column + 0.5) * dataWidth,
+                    _yMinimum + (row + 0.5) * dataHeight
+                );
+                if (std::isfinite(value))
+                {
+                    visibleMinimum = std::min(visibleMinimum, value);
+                    visibleMaximum = std::max(visibleMaximum, value);
+                }
+            }
+        }
+        const double range = visibleMaximum - visibleMinimum;
+        if (!std::isfinite(range)
+            || range <= std::numeric_limits<double>::epsilon())
+        {
+            return;
+        }
+
+        for (int row = 0; row < rows; ++row)
+        {
+            for (int column = 0; column < columns; ++column)
+            {
+                const double x0 = _xMinimum + column * dataWidth;
+                const double y0 = _yMinimum + row * dataHeight;
+                const double x1 = x0 + dataWidth;
+                const double y1 = y0 + dataHeight;
+                const double value = objectiveValue(
+                    0.5 * (x0 + x1),
+                    0.5 * (y0 + y1)
+                );
+                if (!std::isfinite(value))
+                    continue;
+
+                const double normalized = std::clamp(
+                    (value - visibleMinimum) / range,
+                    0.0,
+                    1.0
+                );
+                const std::size_t colorIndex = std::min(
+                    static_cast<std::size_t>(
+                        normalized * static_cast<double>(palette.size())
+                    ),
+                    palette.size() - 1
+                );
+                gui::Shape::drawRect(
+                    gui::Rect(
+                        mapDataX(x0, plot) - 0.35,
+                        mapDataY(y1, plot) - 0.35,
+                        mapDataX(x1, plot) + 0.35,
+                        mapDataY(y0, plot) + 0.35
+                    ),
+                    0.52f,
+                    palette[colorIndex]
                 );
             }
         }
@@ -778,6 +868,8 @@ private:
 
         for (const ContourLevel& contour : _contourLevels)
         {
+            if (!contour.solverLevel && !_showBackgroundContours)
+                continue;
             const double level = contour.value;
             for (int row = 0; row < rows; ++row)
             {
@@ -1002,6 +1094,7 @@ private:
         gui::Shape::drawRect(plot, td::ColorID::SysBackAlt1);
         gui::Transformation::saveContext();
         gui::Transformation::setClip(plot);
+        drawObjectiveLandscape(plot);
         drawFeasibleRegion(plot);
         gui::Transformation::restoreContext();
         drawAxesAndTicks(bounds, plot);
@@ -1079,7 +1172,7 @@ private:
             );
             legendX += 95.0;
         }
-        if (!_inequalities.empty())
+        if (_showFeasibleRegion && !_inequalities.empty())
         {
             gui::Shape::drawRect(
                 gui::Rect(legendX, legendY - 6.0, legendX + 22.0, legendY + 6.0),
@@ -1549,6 +1642,24 @@ public:
         resetZoom();
         _summary = "Solver error";
         _details = message;
+        reDraw();
+    }
+
+    void setShowLandscapeColors(const bool show)
+    {
+        _showLandscapeColors = show;
+        reDraw();
+    }
+
+    void setShowBackgroundContours(const bool show)
+    {
+        _showBackgroundContours = show;
+        reDraw();
+    }
+
+    void setShowFeasibleRegion(const bool show)
+    {
+        _showFeasibleRegion = show;
         reDraw();
     }
 };
