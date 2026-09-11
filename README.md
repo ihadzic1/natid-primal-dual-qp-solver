@@ -157,10 +157,12 @@ shows or hides only the faint gray contours that do not correspond to solver
 iterates, and **Feasible region** controls the translucent green overlay.
 Solver-level iso-lines, the iterate path, constraints, current point, and
 optimum marker remain visible independently of those options. The landscape
-color range adapts to the visible viewport while zooming so small local
-objective differences remain distinguishable. These controls are disabled for
-problems with more than two variables, which continue to use objective value
-versus iteration.
+uses a fixed objective-value scale calculated when the problem is loaded, and
+its raster is anchored to the full problem coordinates. Zooming refines that
+same coordinate grid instead of rebuilding it from the viewport edges, so
+color bands remain aligned with the path, optimum, constraints, and contours.
+These controls are disabled for problems with more than two variables, which
+continue to use objective value versus iteration.
 
 The **QP problem** selector replaces the two separate demo buttons. It contains
 the built-in inequality and equality demos followed by every valid problem

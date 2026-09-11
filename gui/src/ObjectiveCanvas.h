@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -65,6 +66,8 @@ private:
     double _objectiveMaximum = 1.0;
     double _fullObjectiveMinimum = -1.0;
     double _fullObjectiveMaximum = 1.0;
+    double _landscapeMinimum = -1.0;
+    double _landscapeMaximum = 1.0;
     double _zoomLevel = 1.0;
     bool _hasData = false;
     bool _converged = false;
@@ -280,33 +283,12 @@ private:
             solverLevels.end()
         );
 
-        constexpr int columns = 42;
-        constexpr int rows = 30;
         constexpr int backgroundLevelCount = 12;
-        double minimum = std::numeric_limits<double>::infinity();
-        double maximum = -std::numeric_limits<double>::infinity();
-        for (int row = 0; row <= rows; ++row)
-        {
-            const double y = _fullYMinimum
-                + (_fullYMaximum - _fullYMinimum) * row / rows;
-            for (int column = 0; column <= columns; ++column)
-            {
-                const double x = _fullXMinimum
-                    + (_fullXMaximum - _fullXMinimum) * column / columns;
-                const double value = objectiveValue(x, y);
-                if (std::isfinite(value))
-                {
-                    minimum = std::min(minimum, value);
-                    maximum = std::max(maximum, value);
-                }
-            }
-        }
-
         _contourLevels.reserve(solverLevels.size() + backgroundLevelCount);
         for (const double level : solverLevels)
             _contourLevels.push_back({level, true});
 
-        const double range = maximum - minimum;
+        const double range = _landscapeMaximum - _landscapeMinimum;
         if (std::isfinite(range)
             && range > std::numeric_limits<double>::epsilon())
         {
@@ -314,7 +296,7 @@ private:
             const double minimumDistance = 0.35 * spacing;
             for (int index = 1; index <= backgroundLevelCount; ++index)
             {
-                const double candidate = minimum + index * spacing;
+                const double candidate = _landscapeMinimum + index * spacing;
                 const bool tooCloseToSolverLevel = std::any_of(
                     solverLevels.begin(),
                     solverLevels.end(),
@@ -337,6 +319,58 @@ private:
                 return first.value < second.value;
             }
         );
+    }
+
+    void updateLandscapeRange()
+    {
+        constexpr int columns = 64;
+        constexpr int rows = 44;
+        double minimum = std::numeric_limits<double>::infinity();
+        double maximum = -std::numeric_limits<double>::infinity();
+        const auto inspect = [&](const double x, const double y)
+        {
+            const double value = objectiveValue(x, y);
+            if (!std::isfinite(value))
+                return;
+            minimum = std::min(minimum, value);
+            maximum = std::max(maximum, value);
+        };
+
+        for (int row = 0; row <= rows; ++row)
+        {
+            const double y = _fullYMinimum
+                + (_fullYMaximum - _fullYMinimum) * row / rows;
+            for (int column = 0; column <= columns; ++column)
+            {
+                const double x = _fullXMinimum
+                    + (_fullXMaximum - _fullXMinimum) * column / columns;
+                inspect(x, y);
+            }
+        }
+        for (const natid_qp::IterationStats& stats : _history)
+        {
+            if (stats.x.size() >= 2)
+                inspect(stats.x[0], stats.x[1]);
+        }
+        if (_converged)
+            inspect(_optimum[0], _optimum[1]);
+
+        if (!std::isfinite(minimum) || !std::isfinite(maximum))
+        {
+            _landscapeMinimum = -1.0;
+            _landscapeMaximum = 1.0;
+            return;
+        }
+
+        const double scale = std::max({1.0, std::abs(minimum), std::abs(maximum)});
+        if (maximum - minimum <= std::numeric_limits<double>::epsilon() * scale)
+        {
+            const double padding = 1e-9 * scale;
+            minimum -= padding;
+            maximum += padding;
+        }
+        _landscapeMinimum = minimum;
+        _landscapeMaximum = maximum;
     }
 
     void updateObjectiveRange()
@@ -656,40 +690,65 @@ private:
             td::ColorID::DarkOrange,
             td::ColorID::Vermilion
         };
-        constexpr int columns = 64;
-        constexpr int rows = 44;
-        const double dataWidth = (_xMaximum - _xMinimum) / columns;
-        const double dataHeight = (_yMaximum - _yMinimum) / rows;
-        double visibleMinimum = std::numeric_limits<double>::infinity();
-        double visibleMaximum = -std::numeric_limits<double>::infinity();
-        for (int row = 0; row < rows; ++row)
-        {
-            for (int column = 0; column < columns; ++column)
-            {
-                const double value = objectiveValue(
-                    _xMinimum + (column + 0.5) * dataWidth,
-                    _yMinimum + (row + 0.5) * dataHeight
-                );
-                if (std::isfinite(value))
-                {
-                    visibleMinimum = std::min(visibleMinimum, value);
-                    visibleMaximum = std::max(visibleMaximum, value);
-                }
-            }
-        }
-        const double range = visibleMaximum - visibleMinimum;
+        constexpr std::int64_t baseColumns = 64;
+        constexpr std::int64_t baseRows = 44;
+        const int subdivisionExponent = std::clamp(
+            static_cast<int>(std::ceil(std::log2(std::max(1.0, _zoomLevel)))),
+            0,
+            40
+        );
+        const std::int64_t subdivisions = std::int64_t{1}
+            << subdivisionExponent;
+        const std::int64_t totalColumns = baseColumns * subdivisions;
+        const std::int64_t totalRows = baseRows * subdivisions;
+        const double dataWidth = (_fullXMaximum - _fullXMinimum)
+            / static_cast<double>(totalColumns);
+        const double dataHeight = (_fullYMaximum - _fullYMinimum)
+            / static_cast<double>(totalRows);
+        const double range = _landscapeMaximum - _landscapeMinimum;
         if (!std::isfinite(range)
             || range <= std::numeric_limits<double>::epsilon())
         {
             return;
         }
 
-        for (int row = 0; row < rows; ++row)
+        const std::int64_t firstColumn = std::clamp(
+            static_cast<std::int64_t>(std::floor(
+                (_xMinimum - _fullXMinimum) / dataWidth
+            )),
+            std::int64_t{0},
+            totalColumns - 1
+        );
+        const std::int64_t lastColumn = std::clamp(
+            static_cast<std::int64_t>(std::ceil(
+                (_xMaximum - _fullXMinimum) / dataWidth
+            )),
+            firstColumn + 1,
+            totalColumns
+        );
+        const std::int64_t firstRow = std::clamp(
+            static_cast<std::int64_t>(std::floor(
+                (_yMinimum - _fullYMinimum) / dataHeight
+            )),
+            std::int64_t{0},
+            totalRows - 1
+        );
+        const std::int64_t lastRow = std::clamp(
+            static_cast<std::int64_t>(std::ceil(
+                (_yMaximum - _fullYMinimum) / dataHeight
+            )),
+            firstRow + 1,
+            totalRows
+        );
+
+        for (std::int64_t row = firstRow; row < lastRow; ++row)
         {
-            for (int column = 0; column < columns; ++column)
+            for (std::int64_t column = firstColumn;
+                column < lastColumn;
+                ++column)
             {
-                const double x0 = _xMinimum + column * dataWidth;
-                const double y0 = _yMinimum + row * dataHeight;
+                const double x0 = _fullXMinimum + column * dataWidth;
+                const double y0 = _fullYMinimum + row * dataHeight;
                 const double x1 = x0 + dataWidth;
                 const double y1 = y0 + dataHeight;
                 const double value = objectiveValue(
@@ -700,7 +759,7 @@ private:
                     continue;
 
                 const double normalized = std::clamp(
-                    (value - visibleMinimum) / range,
+                    (value - _landscapeMinimum) / range,
                     0.0,
                     1.0
                 );
@@ -1605,6 +1664,7 @@ public:
             _fullXMaximum = _xMaximum;
             _fullYMinimum = _yMinimum;
             _fullYMaximum = _yMaximum;
+            updateLandscapeRange();
             updateContourLevels();
         }
 
@@ -1639,6 +1699,8 @@ public:
         _fullYMaximum = 1.0;
         _fullObjectiveMinimum = -1.0;
         _fullObjectiveMaximum = 1.0;
+        _landscapeMinimum = -1.0;
+        _landscapeMaximum = 1.0;
         resetZoom();
         _summary = "Solver error";
         _details = message;
