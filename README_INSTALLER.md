@@ -90,13 +90,16 @@ creates a usable MSI-only ZIP without weakening antivirus protection.
 includes the Matrix, symbolic solver, model solver, and natGUI runtime packages,
 and embeds all QP problem folders from `data`.
 
-The human-readable product name comes from `gui/res/DevRes.xml`. Since the
-Linux `SetupCollector` also uses that value verbatim for Debian's machine-safe
-`Package` field, the Linux job temporarily supplies `natidqp-solver` while
-collecting and restores `natidqp solver` in the packaged desktop/resources.
-The Linux job additionally places all PNG icon sizes into the DEB hicolor icon
-tree because some `SetupCollector` builds do not populate those directories
-themselves.
+The human-readable product name comes from `gui/res/DevRes.xml`. The Linux
+`SetupCollector` derives Debian's machine-safe `Package` field from the
+executable identifier, which would turn `natid_qp_gui` into an invalid Debian
+package name. During collection, the Linux job places a narrow `dpkg-deb`
+wrapper first on `PATH`; it changes only the generated control field to
+`Package: natidqp-solver` and delegates packaging to `/usr/bin/dpkg-deb`.
+The executable remains `natid_qp_gui`, and the visible product name remains
+`natidqp solver`. The Linux job additionally places all PNG icon sizes into the
+DEB hicolor icon tree because some `SetupCollector` builds do not populate
+those directories themselves.
 
 Icon assets:
 
