@@ -1,9 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<DevRes xmlns:lin="linux"
-        version="1.0.0"
+<DevRes version="1.0.0"
         regionals="Common/Regionals"
         displayName="natidqp solver"
-        lin:displayName="natidqp-solver"
         maintainer="Irfan Hadzic"
         majorVersion="1"
         minorVersion="0"

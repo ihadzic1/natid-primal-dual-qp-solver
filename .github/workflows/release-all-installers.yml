@@ -302,6 +302,29 @@ jobs:
             "$HOME/natidqp.Setups/Packages/modSolver.xml"
           cp "$GITHUB_WORKSPACE/packaging/modSolver.xml" \
             "$HOME/natID.SDK/DevEnv/SetupCollectors/Packages/modSolver.xml"
+
+          # SetupCollector uses displayName verbatim as Debian's Package field.
+          # Debian identifiers cannot contain spaces, while the human-facing
+          # application name intentionally does. Sanitize only for collection;
+          # the checked-out source is restored automatically when this step ends.
+          dev_res="$GITHUB_WORKSPACE/gui/res/DevRes.xml"
+          dev_res_backup="$RUNNER_TEMP/natidqp-devres.xml"
+          cp "$dev_res" "$dev_res_backup"
+          restore_dev_res() {
+            cp "$dev_res_backup" "$dev_res"
+          }
+          trap restore_dev_res EXIT
+          sed -i \
+            's/^\([[:space:]]*\)displayName="natidqp solver"/\1displayName="natidqp-solver"/' \
+            "$dev_res"
+          linux_package_name="$(sed -n \
+            's/^[[:space:]]*displayName="\([^"]*\)".*/\1/p' \
+            "$dev_res")"
+          if [[ ! "$linux_package_name" =~ ^[a-z0-9][a-z0-9+.-]+$ ]]; then
+            echo "Invalid Debian package name prepared for SetupCollector: $linux_package_name" >&2
+            exit 1
+          fi
+
           chmod +x "$HOME/natID.Utils/linux/SetupCollector"
           "$HOME/natID.Utils/linux/SetupCollector" \
             "$HOME/natidqp.Setups/NatIDQP.xml"
@@ -326,8 +349,17 @@ jobs:
             cp "$icon_source/lnxApp${size}.png" "$icon_dir/natid_qp_gui.png"
           done
           while IFS= read -r desktop_file; do
+            sed -i 's/^Name=.*/Name=natidqp solver/' "$desktop_file"
             sed -i 's/^Icon=.*/Icon=natid_qp_gui/' "$desktop_file"
           done < <(find "$patch_root/package/usr/share/applications" -type f -name "*.desktop" 2>/dev/null)
+
+          # Restore the human-facing application name inside packaged resources
+          # without changing Debian's already-generated Package identifier.
+          while IFS= read -r dev_res_file; do
+            sed -i \
+              's/^\([[:space:]]*\)displayName="natidqp-solver"/\1displayName="natidqp solver"/' \
+              "$dev_res_file"
+          done < <(find "$patch_root/package" -type f -name "DevRes.xml" 2>/dev/null)
 
           dpkg-deb -b "$patch_root/package" "$patch_root/patched.deb"
           mv "$patch_root/patched.deb" "$deb"
