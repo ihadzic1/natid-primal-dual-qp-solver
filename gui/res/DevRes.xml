@@ -1,10 +1,13 @@
-<?xml version="1.0"?>
-<DevRes regionals="Common/Regionals"
-        displayName="natID Primal-Dual QP Solver"
-        maintainer="Irfan Hadžić"
+<?xml version="1.0" encoding="utf-8"?>
+<DevRes xmlns:lin="linux"
+        version="1.0.0"
+        regionals="Common/Regionals"
+        displayName="natidqp solver"
+        lin:displayName="natidqp-solver"
+        maintainer="Irfan Hadzic"
         majorVersion="1"
         minorVersion="0"
-        versionDate="2026-09-09"
+        versionDate="2026-09-11"
         comment="Primal-dual interior-point solver for convex quadratic programming using natID sparse and dense matrices.">
     <Langs>
         <Lang id="EN" name="English"/>

@@ -5,8 +5,13 @@ project(${SOLUTION_NAME} VERSION 1.0.0 LANGUAGES CXX)
 
 set(SOURCE_ROOT ${CMAKE_CURRENT_LIST_DIR})
 
-# Required by the natID IDE helper functions used by the GUI target.
-if(WIN32)
+# Required by the natID IDE helper functions used by the GUI target. The
+# optional override keeps local/CI installer builds isolated without changing
+# the process HOME or USERPROFILE variables.
+set(NATID_QP_HOME_ROOT "" CACHE PATH "Optional natID build-home override")
+if(NATID_QP_HOME_ROOT)
+    file(TO_CMAKE_PATH "${NATID_QP_HOME_ROOT}" HOME_ROOT)
+elseif(WIN32)
     file(TO_CMAKE_PATH "$ENV{USERPROFILE}" HOME_ROOT)
 else()
     file(TO_CMAKE_PATH "$ENV{HOME}" HOME_ROOT)

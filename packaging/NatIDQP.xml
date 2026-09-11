@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <SetupCollector xmlns:win="windows" xmlns:mac="macOS" xmlns:lin="linux" executableName="natid_qp_gui">
-    <Folders dev="~Desktop/NatIDQP-Packaging-Source/gui"
+    <Folders dev="~Desktop/natidqp-solver-source/gui"
              executable="$RAMDisk/Out/NatIDQP/Release"
              out="$RAMDisk/Setup/natid_qp_gui"/>
     <Packages debug="false">
@@ -16,18 +16,19 @@
              dep="schemas"
              exclude="macOS,linux"/>
         <Res type="folder"
-             dev="~Desktop/NatIDQP-Packaging-Source/data"
+             dev="~Desktop/natidqp-solver-source/data"
              dep="data"/>
     </ResData>
     <MutableResource/>
     <Setup licenseFileName="~natID.SDK/DevEnv/License.txt"
            categories="Education;Science;Utility"
-           win:programGroup="NatIDQP"
+           win:programGroup="natidqp solver"
            win:width="440"
            win:headerBackColor="#1E5AA8"
            win:headerTxtColor="#FFFFFF"
            win:licenseTxtColor="#404040"
            win:useMakeCabinet="true"
            win:minBuildNumber="17763"
-           lin:depends="$DepGTKv4"/>
+           lin:depends="$DepGTKv4"
+           lin:icon="$HOME/Desktop/natidqp-solver-source/gui/res/appIcon/lnxApp128"/>
 </SetupCollector>

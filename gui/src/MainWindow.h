@@ -19,7 +19,7 @@ public:
     MainWindow()
     : gui::Window(gui::Size(1040, 720))
     {
-        setTitle("NatIDQP - Native convergence visualization");
+        setTitle("natidqp solver");
         setCentralView(&_dashboard);
         setResizable(true);
     }

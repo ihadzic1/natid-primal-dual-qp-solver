@@ -292,6 +292,14 @@ logarithmic scale.
 See [docs/ALGORITHM.md](docs/ALGORITHM.md) for the derivation and direct mapping
 from each mathematical step to the natID implementation.
 
+## Application installers
+
+The desktop product is named **natidqp solver** and uses the project icon on
+Windows, macOS, and Linux. The release workflow builds and tests the program
+against a matching natID SDK release before creating the Windows MSI, macOS
+application bundles, and Linux DEB. See
+[README_INSTALLER.md](README_INSTALLER.md) for local and GitHub Actions usage.
+
 ## References
 
 - J. Nocedal and S. J. Wright, *Numerical Optimization*, 2nd edition,

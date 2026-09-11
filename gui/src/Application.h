@@ -14,7 +14,7 @@ protected:
 
 public:
     Application(const int argc, const char** argv)
-    : gui::Application(argc, argv, "ba.unsa.etf.NatIDQP.GUI")
+    : gui::Application(argc, argv, "ba.unsa.etf.natidqp.solver")
     {
     }
 };
